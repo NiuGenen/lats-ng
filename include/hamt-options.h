@@ -68,6 +68,19 @@ static inline int hamt_enable_ipi_sync(void) {
     return option_hamt_config & 0x200;
 }
 
+static inline int hamt_enable_plv(void) {
+    return option_hamt_config & 0x400;
+}
+#define HAMT_PROT_ADD_PLV(prot, plv) do {   \
+    prot = (((plv) & 0x3) << 12) | prot;    \
+} while (0)
+#define HAMT_PROT_DEL_PLV(prot) do {        \
+    prot = prot & ~(0x3 << 12);             \
+} while (0)
+#define HAMT_PROT_GET_PLV(prot, plv) do {   \
+    plv = (prot >> 12) & 0x3;               \
+} while (0)
+
 static inline int hamt_use_pgd(void) {
     return option_hamt_config & 0x10;
 }

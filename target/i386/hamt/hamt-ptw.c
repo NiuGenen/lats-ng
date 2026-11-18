@@ -614,8 +614,15 @@ do_check_protect:
     rsvd_mask |= (page_size - 1) & PG_ADDRESS_MASK & ~PG_PSE_PAT_MASK;
     if (pte & rsvd_mask) goto do_fault_rsvd;
 
-    /* can the page can be put in the TLB?  prot will tell us */
-    if (is_user && !(ptep & PG_USER_MASK)) goto do_fault_protect;
+    /* Guest page permissions are independent of the host PLV encoding. */
+    if (is_user && !(ptep & PG_USER_MASK)) {
+        goto do_fault_protect;
+    }
+
+    int plv = 0;
+    if (hamt_enable_plv()) {
+        plv = (ptep & PG_USER_MASK) ? 3 : 0;
+    }
 
     int prot = PAGE_READ;
     if ((ptep & PG_RW_MASK)) prot |= PAGE_WRITE;
@@ -695,6 +702,7 @@ do_check_protect:
 #endif
 
     ptwerror->error = HAMT_PTW_ERROR_NONE;
+    if (hamt_enable_plv()) HAMT_PROT_ADD_PLV(prot, plv);
     if (!option_pcid_asid && page_size > TARGET_PAGE_SIZE) {
         env->hamt_large_page_bits |= page_size == (1U << HAMT_LARGE_PAGE_SHIFT)
                                      ? hamt_large_page_bit(addr) : UINT32_MAX;

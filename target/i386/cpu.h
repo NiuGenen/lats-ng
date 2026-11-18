@@ -1640,6 +1640,8 @@ typedef struct CPUArchState {
 #ifdef CONFIG_SOFTMMU
     /* Candidates for a split large mapping in the local HAMT TLB. */
     uint32_t hamt_large_page_bits;
+    /* PTE U/S masks captured by the current tlbrefill for ELO0 and ELO1. */
+    uint32_t hamt_tlbr_user_mask[2];
 #endif
     void *pcid_itlb_user;
     void *pcid_itlb_kernel;

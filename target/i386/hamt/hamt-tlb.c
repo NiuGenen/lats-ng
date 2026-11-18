@@ -270,6 +270,8 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
     int w = prot & PAGE_WRITE ? 1 : 0;
     int r = prot & PAGE_READ  ? 1 : 0;
     int x = prot & PAGE_EXEC  ? 1 : 0;
+    int plv = 0;
+    HAMT_PROT_GET_PLV(prot, plv);
 
     csr_tlbr_ehi = vaddr & ~0x1fffULL;
     write_csr_tlbr_ehi(csr_tlbr_ehi);
@@ -294,6 +296,7 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
         if (mode) {
             csr_tlbr_elo1 = ((paddr >> 12 << 12) | TLBRELO0_STANDARD_BITS) & (~((uint64_t)0xe000 << 48));
             set_attr(r, w, x, &csr_tlbr_elo1);
+            csr_tlbr_elo1 |= (uint64_t)plv << 2;
         }
         else csr_tlbr_elo1 = 0; 
         if (is_2111) csr_tlbr_elo0 = 0;
@@ -301,6 +304,7 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
         if (mode) {
             csr_tlbr_elo0 = ((paddr >> 12 << 12) | TLBRELO0_STANDARD_BITS) & (~((uint64_t)0xe000 << 48));
             set_attr(r, w, x, &csr_tlbr_elo0);
+            csr_tlbr_elo0 |= (uint64_t)plv << 2;
         }
         else csr_tlbr_elo0 = 0; 
         if (is_2111) csr_tlbr_elo1 = 0;
@@ -347,8 +351,12 @@ void hamt_set_tlb(void *env,
     int32_t csr_tlbidx;
 
     int w = prot & PAGE_WRITE ? 1 : 0;
+    int plv = 0;
+    HAMT_PROT_GET_PLV(prot, plv);
 
-    disable_pg();
+    if (!hamt_dmw_mode_da()) {
+        disable_pg();
+    }
 
     csr_tlbehi = vaddr & ~0x1fffULL;
     write_csr_tlbehi(csr_tlbehi);
@@ -365,12 +373,14 @@ void hamt_set_tlb(void *env,
         if (mode) {
             csr_tlbelo1 = ((paddr >> 12 << 12) | 0x11) & (~((uint64_t)0xe000 << 48));
             if (w) csr_tlbelo1 |= 0x2;
+            csr_tlbelo1 |= (uint64_t)plv << 2;
         }
         else csr_tlbelo1 = 0; 
     } else {
         if (mode) {
             csr_tlbelo0 = ((paddr >> 12 << 12) | 0x11) & (~((uint64_t)0xe000 << 48));
             if (w) csr_tlbelo0 |= 0x2;
+            csr_tlbelo0 |= (uint64_t)plv << 2;
         }
         else csr_tlbelo0 = 0;
     }

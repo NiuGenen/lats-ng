@@ -1237,6 +1237,7 @@ static void latx_sys_check_options(void)
         option_pcid_asid = 0;
         option_pcid_cache = 0;
     }
+    /* DA ignores ASID; the guest PCID context is published before PG entry. */
     if (option_pcid_cache &&
         (!option_pcid_asid || !latx_jmp_cache_compact_enabled())) {
         fprintf(stderr, "WARNING: pcidcache requires pcidasid and compact NJC. "
@@ -1362,6 +1363,15 @@ static void latx_sys_check_options(void)
     }
 
 #ifdef CONFIG_SOFTMMU
+    if (hamt_mode_dmw() && option_hamt_submode > 1) {
+        fprintf(stderr, "ERROR: hamtsubmode=%d is not supported for HAMT-DMW\n",
+                option_hamt_submode);
+        exit(1);
+    }
+    if (hamt_enable_plv() && !hamt_dmw_mode_da()) {
+        fprintf(stderr, "ERROR: hamt PLV requires hamtmode=1,hamtsubmode=1\n");
+        exit(1);
+    }
     hamt_init_options_configuration();
 #endif
 
@@ -1899,7 +1909,12 @@ void dump_latxs_options(void)
     latx_options_printf("[LATX-SYS] hamt enabled = 0x%x\n", option_hamt);
     latx_options_printf("[LATX-SYS] hamt mode = %d\n", option_hamt_mode);
     latx_options_printf("[LATX-SYS]   submode = %d\n", option_hamt_submode);
+    latx_options_printf("[LATX-SYS] dmw default/DA = %d/%d\n",
+                        hamt_dmw_mode_default(), hamt_dmw_mode_da());
     latx_options_printf("[LATX-SYS] hamt cfg  = 0x%x\n", option_hamt_config);
+    latx_options_printf("[LATX-SYS] PTW flags refill = %d\n",
+                        hamt_use_ptw_inrefill_4K2M_ptwflags());
+    latx_options_printf("[LATX-SYS] PLV support = %d\n", !!hamt_enable_plv());
     latx_options_printf("[LATX-SYS] kvm init htimer = 0x%x\n", option_htimer);
     latx_options_printf("[LATX-SYS] irq gate no-BQL = 0x%x\n",
                         option_irq_gate_nobql);

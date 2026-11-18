@@ -13,6 +13,7 @@
 #include "sys-excp.h"
 #include <string.h>
 
+#include "latx-sys-hamt.h"
 #include "latx-sys-hamt-dmw.h"
 
 void latxs_tr_dmw_in_fix_mem(IR2_OPND *mem)
@@ -116,4 +117,116 @@ void latxs_tr_dmw_in_da_tmp(void)
         latxs_ra_free_temp(&t0);
         latxs_ra_free_temp(&t1);
     }
+}
+
+void latxs_tr_dmw_in_plv0_break(void)
+{
+    if (hamt_enable_plv()) {
+        IR2_OPND c = la_code(HAMT_BREAK_CODE_TOPLV0);
+        la_out1(LISA_BREAK, &c);
+        la_comment("break to PLV0");
+    }
+}
+
+void latxs_tr_dmw_in_plv3_break(void)
+{
+    if (hamt_enable_plv()) {
+        IR2_OPND c = la_code(HAMT_BREAK_CODE_TOPLV3);
+        la_out1(LISA_BREAK, &c);
+        la_comment("break to PLV3");
+    }
+}
+
+void latxs_tr_dmw_in_plv0(IR2_OPND *tmp)
+{
+    if (hamt_enable_plv()) {
+        latxs_tr_dmw_in_plv0_break();
+    }
+}
+
+void latxs_tr_dmw_in_plv3(IR2_OPND *tmp)
+{
+    if (hamt_enable_plv()) {
+        la_out2(LISA_CSRRD, tmp, &la_csr_crmd);
+        la_out2i(LISA_ORI, tmp, tmp, 0x3);
+        la_out2(LISA_CSRWR, &la_csr_crmd, tmp);
+    }
+}
+
+void latxs_tr_dmw_in_plv0_tmp(void)
+{
+    if (hamt_enable_plv()) {
+        IR2_OPND t0 = latxs_ra_alloc_itemp();
+        latxs_tr_dmw_in_plv0(&t0);
+        latxs_ra_free_temp(&t0);
+    }
+}
+
+void latxs_tr_dmw_in_plv3_tmp(void)
+{
+    if (hamt_enable_plv()) {
+        IR2_OPND t0 = latxs_ra_alloc_itemp();
+        latxs_tr_dmw_in_plv3(&t0);
+        latxs_ra_free_temp(&t0);
+    }
+}
+
+void latxs_tr_dmw_in_plv_cpl(IR2_OPND *tmp, IR2_OPND *cpl)
+{
+    if (hamt_enable_plv()) {
+        la_out2(LISA_CSRRD, tmp, &la_csr_crmd);
+        la_out2ii(LISA_BSTRINS_D, tmp, &la_zero, 1, 0);
+        la_out3(LISA_OR, tmp, tmp, cpl);
+        la_out2(LISA_CSRWR, &la_csr_crmd, tmp);
+    }
+}
+
+void latxs_tr_dmw_in_plv_env(IR2_OPND *t0, IR2_OPND *t1, IR2_OPND *env)
+{
+    if (hamt_enable_plv()) {
+        la_out2i(LISA_LD_WU, t1, env, offsetof(CPUX86State, hflags));
+        la_out2i(LISA_ANDI, t1, t1, 0x3);
+        la_comment("read current CPL");
+        latxs_tr_dmw_in_plv_cpl(t0, t1);
+        la_comment("switch PLV according to CPL");
+    }
+}
+
+void latxs_tr_dmw_in_plv_env_tmp(IR2_OPND *env)
+{
+    if (hamt_enable_plv()) {
+        IR2_OPND tmp = latxs_ra_alloc_itemp();
+        IR2_OPND cpl = latxs_ra_alloc_itemp();
+        latxs_tr_dmw_in_plv_env(&tmp, &cpl, env);
+        latxs_ra_free_temp(&tmp);
+        latxs_ra_free_temp(&cpl);
+    }
+}
+
+void latxs_tr_dmw_in_plv_env_break(IR2_OPND *t0, IR2_OPND *env)
+{
+    if (!hamt_enable_plv()) return;
+
+    IR2_OPND cpl_is_zero = la_new_label();
+    IR2_OPND finish = la_new_label();
+
+    la_out2i(LISA_LD_WU, t0, env, offsetof(CPUX86State, hflags));
+    la_out2i(LISA_ANDI, t0, t0, 0x3);
+    la_comment("read current CPL");
+    la_out2(LISA_BEQZ, t0, &cpl_is_zero);
+    latxs_tr_dmw_in_plv3_break();
+    la_out1(LISA_B, &finish);
+
+    la_label_name(cpl_is_zero, "CPL = 0");
+    latxs_tr_dmw_in_plv0_break();
+    la_label_name(finish, "finish: switch PLV by CPL");
+}
+
+void latxs_tr_dmw_in_plv_env_break_tmp(IR2_OPND *env)
+{
+    if (!hamt_enable_plv()) return;
+
+    IR2_OPND tmp = latxs_ra_alloc_itemp();
+    latxs_tr_dmw_in_plv_env_break(&tmp, env);
+    latxs_ra_free_temp(&tmp);
 }
