@@ -2381,8 +2381,8 @@ void latxs_options_init(void)
 #ifdef CONFIG_SOFTMMU
     option_hamt = 1; // hamt
     option_hamt_mode = HAMT_MODE_DMW; // hamtmode
-    option_hamt_submode = 0; // hamtsubmode
-    option_hamt_config = 0x33e9; // hamtconfig, taskset and nosmt
+    option_hamt_submode = 1; // DA/PG mode
+    option_hamt_config = 0x3769; // ptwflags, PLV, taskset and nosmt
     option_pcid = 1;
     option_pcid_asid = 1;
     option_pcid_cache = 1;
