@@ -7,25 +7,30 @@
 #ifndef _HATM_PTW_H_
 #define _HATM_PTW_H_
 
-void *hamt_get_ptwdata(void);
+/* Final HAMT direct-access permissions for one 4K GPA. */
+#define HAMT_PTWFLAGS_NOWRITE       (1U << 0)
+#define HAMT_PTWFLAGS_NOACCESS      (1U << 1)
+#define HAMT_PTWFLAGS_NOACCESS_MASK (0x7eU)
+#define HAMT_PTWFLAGS_WRITE_MASK    (0x7fU)
+/* Set on the first page of a 1M group when a 1M mapping is unsafe. */
+#define HAMT_PTWFLAGS_NO2M          (1U << 7)
+
 void *hamt_get_ptwdata1m(void);
-void hamt_ptwdata_set_mmio(uint64_t base, uint64_t size);
-void hamt_ptwdata_smc_protect(uint64_t base, uint64_t size);
-void hamt_ptwdata_smc_unprotect(uint64_t base, uint64_t size);
-void hamt_ptwdata_smc_protect_page(uint64_t page);
-void hamt_ptwdata_smc_unprotect_page(uint64_t page);
-void hamt_ptwdata_vga_protect(uint64_t base, uint64_t size);
-void hamt_ptwdata_vga_unprotect(uint64_t base, uint64_t size);
+void *hamt_get_ptwflags(void);
+uint64_t hamt_get_ptwflags_size(void);
+void hamt_ptwflags_set_mmio(uint64_t base, uint64_t size);
+void hamt_ptwflags_vga_protect(uint64_t base, uint64_t size);
+void hamt_ptwflags_smc_protect_page(uint64_t page);
+void hamt_ptwflags_smc_unprotect_page(uint64_t page);
+void hamt_ptwflags_invalidate_all(void);
 
-bool hamt_ptwdata_smc_page_is_protected(uint64_t page);
-bool hamt_ptwdata_smc_range_is_protected(uint64_t base, uint64_t size);
-bool hamt_ptwdata_vga_range_is_protected(uint64_t base, uint64_t size);
+struct CPUState;
+void hamt_ptwflags_sync_tlb(struct CPUState *cpu);
 
-void hamt_ptwdata_vga_snapshot(uint64_t base, uint64_t size, uint8_t *dest);
-bool hamt_ptwdata_vga_snapshot_is_dirty(uint64_t base, uint64_t size, uint8_t *snap);
+bool hamt_ptwflags_smc_page_is_protected(uint64_t page);
+bool hamt_ptwflags_smc_range_is_protected(uint64_t base, uint64_t size);
 
-uint8_t hamt_ptwdata_get_page(uint64_t page);
-void hamt_ptwdata_set_page(uint64_t page, uint8_t v);
+uint8_t hamt_ptwflags_get_page(uint64_t page);
 
 void *hamt_get_ptwrcd(int cpuid);
 void hamt_set_ptwrcd(int cpuid, uint64_t gpa);

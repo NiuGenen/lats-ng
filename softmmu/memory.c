@@ -769,8 +769,8 @@ static FlatView *generate_memory_topology(MemoryRegion *mr,
             section_from_flat_range(&view->ranges[i], view);
 #ifdef CONFIG_LATX_HACK_MEM
         if (update && !(mrs.mr->ram)) {
-            hamt_ptwdata_set_mmio((uint64_t)mrs.offset_within_address_space,
-                                  (uint64_t)mrs.size);
+            hamt_ptwflags_set_mmio((uint64_t)mrs.offset_within_address_space,
+                                   (uint64_t)mrs.size);
         }
 #endif
         flatview_add_to_dispatch(view, &mrs);
@@ -2428,8 +2428,6 @@ DirtyBitmapSnapshot *memory_region_snapshot_and_clear_dirty(MemoryRegion *mr,
     return snapshot;
 }
 
-uint8_t *dirty_bitmap_snapshot_get_dirty(DirtyBitmapSnapshot *snap);
-
 bool memory_region_snapshot_get_dirty(MemoryRegion *mr, DirtyBitmapSnapshot *snap,
                                       hwaddr addr, hwaddr size)
 {
@@ -2437,8 +2435,6 @@ bool memory_region_snapshot_get_dirty(MemoryRegion *mr, DirtyBitmapSnapshot *sna
 #ifdef CONFIG_LATX_HACK_MEM
     if (strncmp(mr->name, "vga.vram", 8) == 0) {
         if (hamt_no_vga_dirty()) return true;
-        return hamt_ptwdata_vga_snapshot_is_dirty(addr, size,
-                dirty_bitmap_snapshot_get_dirty(snap));
     }
 #endif
     return cpu_physical_memory_snapshot_get_dirty(snap,

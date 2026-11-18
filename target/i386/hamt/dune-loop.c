@@ -27,6 +27,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/rcu.h"
 #include "loongarch-extcontext.h"
+#include "hw/core/cpu.h"
 
 #include "kvm-csr.h"
 
@@ -53,6 +54,7 @@
 #undef KVM_REG_LOONGARCH
 #define KVM_REG_LOONGARCH 0x9000000000000000ULL
 #endif
+#include "hamt-ptw.h"
 
 /* dune_loop is called from switch_stack in entry-stack.S */
 void dune_loop(struct dune_kvm_cpu *vcpu);
@@ -276,6 +278,7 @@ static void dune_capture_native_interrupt(struct dune_kvm_cpu *vcpu)
 void dune_loop(struct dune_kvm_cpu *vcpu)
 {
     while (true) {
+        hamt_ptwflags_sync_tlb(qemu_get_cpu(vcpu->cpu_id));
         hamt_start_running();
         long err = dune_kvm_run(vcpu->vcpu_fd);
         int run_errno = err < 0 ? -err : 0;

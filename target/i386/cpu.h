@@ -1620,8 +1620,8 @@ typedef struct LatxAOTCallObservation {
 } LatxAOTCallObservation;
 
 typedef struct CPUArchState {
-    void *ptw4k;
     void *ptw1m;
+    void *ptwflags;
     uint64_t vram_base;
     uint64_t vram_size;
     ZMMReg_128 xmm_regs[CPU_NB_REGS == 8 ? 8 : 32] QEMU_ALIGNED(16);

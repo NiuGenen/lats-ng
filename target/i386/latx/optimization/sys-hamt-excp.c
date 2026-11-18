@@ -24,6 +24,7 @@
 #include "loongarch-extcontext.h"
 #include "hamt-data.h"
 #include "hamt-internal.h"
+#include "hamt-ptw.h"
 #include "hamt-tlb.h"
 #include "hamt-options.h"
 #include "hamt-entry-func.h"
@@ -602,18 +603,21 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
      */
 
     IR2_OPND big_page_do_4k = la_new_label();
-    /* check ptwdata1m[paddr>>20] */
-    la_out2i(LISA_SRLI_D, &la_t4, &la_t1, 19); // (paddr0 >> 20) * 2
-    la_out2i(LISA_SRLI_D, &la_t6, &la_t2, 19); // (paddr1 >> 20) * 2
+    /* ptwflags is one byte per 4K GPA. The NO2M bit lives on the
+     * first 4K page of each 1M group, matching the two ELO entries. */
+    la_out2i(LISA_SRLI_D, &la_t4, &la_t1, 12);
+    la_out2i(LISA_SRLI_D, &la_t6, &la_t2, 12);
     la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t7);
     la_out3 (LISA_ADD_D,  &la_t2, &la_t2, &la_t7);
-    la_out2i(LISA_LD_D,   &la_a3, &la_env, offsetof(CPUX86State, ptw1m));
-    la_out3 (LISA_LDX_HU, &la_t4, &la_a3, &la_t4); // ptwdata1m[paddr0>>20]
-    la_out3 (LISA_LDX_HU, &la_t6, &la_a3, &la_t6); // ptwdata1m[paddr1>>20]
-    la_out3 (LISA_OR,   &la_a3, &la_t4, &la_t6);
-    la_out2 (LISA_BNEZ, &la_a3, &big_page_do_4k);
-    la_out3(LISA_MASKNEZ, &la_a0, &la_a0, &la_t4); // if (smc) D=0
-    la_out3(LISA_MASKNEZ, &la_a1, &la_a1, &la_t6); // if (smc) D=0
+    la_out2i(LISA_LD_D,   &la_a3, &la_env, offsetof(CPUX86State, ptwflags));
+    la_out3 (LISA_LDX_B,  &la_t4, &la_a3, &la_t4);
+    la_out3 (LISA_LDX_B,  &la_t6, &la_a3, &la_t6);
+    la_out2i(LISA_ANDI,   &la_t4, &la_t4, HAMT_PTWFLAGS_NO2M);
+    la_out2i(LISA_ANDI,   &la_t6, &la_t6, HAMT_PTWFLAGS_NO2M);
+    la_out3 (LISA_OR,     &la_a3, &la_t4, &la_t6);
+    la_out2 (LISA_BNEZ,   &la_a3, &big_page_do_4k);
+    la_out3(LISA_MASKNEZ, &la_a0, &la_a0, &la_t4);
+    la_out3(LISA_MASKNEZ, &la_a1, &la_a1, &la_t6);
 
     /*
      * la_t0 : vaddr
@@ -684,16 +688,22 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
      * la_a0 : D(1) for elo0 after RW
      * la_a1 : D(1) for elo1 after RW
      */
-    /* check ptwdata[paddr>>12] */
+    /* check ptwflags[paddr>>12] */
     la_out2i(LISA_SRLI_D, &la_t4, &la_t1, 12); // paddr0 >> 12
     la_out2i(LISA_SRLI_D, &la_t6, &la_t2, 12); // paddr1 >> 12
     la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t7);
     la_out3 (LISA_ADD_D,  &la_t2, &la_t2, &la_t7);
-    la_out2i(LISA_LD_D,   &la_a3, &la_env, offsetof(CPUX86State, ptw4k));
-    la_out3 (LISA_LDX_B,  &la_t4, &la_a3, &la_t4); // ptwdata[paddr0>>12]
-    la_out3 (LISA_LDX_B,  &la_t6, &la_a3, &la_t6); // ptwdata[paddr1>>12]
-    la_out3(LISA_MASKNEZ, &la_a0, &la_a0, &la_t4); // if (smc) D=0
-    la_out3(LISA_MASKNEZ, &la_a1, &la_a1, &la_t6); // if (smc) D=0
+    la_out2i(LISA_LD_D,   &la_a3, &la_env, offsetof(CPUX86State, ptwflags));
+    la_out3 (LISA_LDX_B,  &la_t4, &la_a3, &la_t4);
+    la_out3 (LISA_LDX_B,  &la_t6, &la_a3, &la_t6);
+    la_out2i(LISA_ANDI,   &la_t3, &la_t4, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out2i(LISA_ANDI,   &la_t5, &la_t6, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out3 (LISA_OR,     &la_t3, &la_t3, &la_t5);
+    la_out2 (LISA_BNEZ,   &la_t3, &ptw_no);
+    la_out2i(LISA_ANDI,   &la_t4, &la_t4, HAMT_PTWFLAGS_WRITE_MASK);
+    la_out2i(LISA_ANDI,   &la_t6, &la_t6, HAMT_PTWFLAGS_WRITE_MASK);
+    la_out3(LISA_MASKNEZ, &la_a0, &la_a0, &la_t4); // if (NOWRITE) D=0
+    la_out3(LISA_MASKNEZ, &la_a1, &la_a1, &la_t6); // if (NOWRITE) D=0
 
     /*
      * la_t0 : vaddr
@@ -941,17 +951,23 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
     la_out2i(LISA_SRLI_D, &la_t5, &la_t2, 12);     // paddr1 >> 12
     la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t7);
     la_out3 (LISA_ADD_D,  &la_t2, &la_t2, &la_t7);
-    la_out2i(LISA_LD_D,   &la_t3, &la_env, offsetof(CPUX86State, ptw4k));
+    la_out2i(LISA_LD_D,   &la_t3, &la_env, offsetof(CPUX86State, ptwflags));
     la_out3 (LISA_MASKEQZ, &la_t4, &la_t4, &la_a2);
     la_out3 (LISA_MASKEQZ, &la_t5, &la_t5, &la_a3);
-    la_out3 (LISA_LDX_B,  &la_t4, &la_t3, &la_t4); // ptwdata[paddr0]
-    la_out3 (LISA_LDX_B,  &la_t5, &la_t3, &la_t5); // ptwdata[paddr1]
+    la_out3 (LISA_LDX_B,  &la_t4, &la_t3, &la_t4);
+    la_out3 (LISA_LDX_B,  &la_t5, &la_t3, &la_t5);
+    la_out2i(LISA_ANDI,   &la_a4, &la_t4, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out2i(LISA_ANDI,   &la_a5, &la_t5, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out2i(LISA_ANDI,   &la_t4, &la_t4, HAMT_PTWFLAGS_WRITE_MASK);
+    la_out2i(LISA_ANDI,   &la_t5, &la_t5, HAMT_PTWFLAGS_WRITE_MASK);
     /*
      * la_t0 : vaddr
      * la_t1 : haddr 4K page for elo0
      * la_t2 : haddr 4K page for elo1
-     * la_t4 : ptwdata[paddr0>>12] for elo0
-     * la_t5 : ptwdata[paddr1>>12] for elo1
+     * la_t4 : NOWRITE bits for elo0
+     * la_t5 : NOWRITE bits for elo1
+     * la_a4 : NOACCESS bits for elo0
+     * la_a5 : NOACCESS bits for elo1
      * la_a0 : RW for elo0
      * la_a1 : RW for elo1
      * la_a2 : valid for elo0
@@ -961,24 +977,22 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
     la_out2i(LISA_ORI, &la_t7, &la_zero, 0x2); // D(1) in elo1
     la_out3(LISA_MASKEQZ, &la_t6, &la_t6, &la_a0); // if (!rw) D=0
     la_out3(LISA_MASKEQZ, &la_t7, &la_t7, &la_a1);
-    la_out3(LISA_MASKNEZ, &la_t6, &la_t6, &la_t4); // if (!ptwdata) D=0
+    la_out3(LISA_MASKNEZ, &la_t6, &la_t6, &la_t4); // if (NOWRITE) D=0
     la_out3(LISA_MASKNEZ, &la_t7, &la_t7, &la_t5);
     /*
      * la_t0 : vaddr
      * la_t1 : haddr 4K page for elo0
      * la_t2 : haddr 4K page for elo1
-     * la_t4 : ptwdata[paddr0>>12] for elo0
-     * la_t5 : ptwdata[paddr1>>12] for elo1
+     * la_t4 : NOWRITE bits for elo0
+     * la_t5 : NOWRITE bits for elo1
      * la_t6 : D(1) for elo0
      * la_t7 : D(1) for elo1
      * la_a2 : valid for elo0
      * la_a3 : valid for elo1
      */
     la_out2i(LISA_ORI, &la_t3, &la_zero, 0x1); // v(0) in elo
-    la_out2i(LISA_ANDI, &la_t4, &la_t4, 0x1);
-    la_out2i(LISA_ANDI, &la_t5, &la_t5, 0x1);
-    la_out3(LISA_MASKNEZ, &la_t4, &la_t3, &la_t4); // elo0 valid after mmio
-    la_out3(LISA_MASKNEZ, &la_t5, &la_t3, &la_t5); // elo1 valid after mmio
+    la_out3(LISA_MASKNEZ, &la_t4, &la_t3, &la_a4); // elo0 invalid on noaccess
+    la_out3(LISA_MASKNEZ, &la_t5, &la_t3, &la_a5); // elo1 invalid on noaccess
     la_out3(LISA_MASKEQZ, &la_t4, &la_t4, &la_a2); // elo0 valid after PTW
     la_out3(LISA_MASKEQZ, &la_t5, &la_t5, &la_a3); // elo1 valid after PTW
     la_out3(LISA_OR,   &la_a2, &la_t4, &la_t5);
@@ -1476,17 +1490,23 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2(hamt_excp_t *d)
     la_out2i(LISA_SRLI_D, &la_t5, &la_t2, 12);     // paddr1 >> 12
     la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t7);
     la_out3 (LISA_ADD_D,  &la_t2, &la_t2, &la_t7);
-    la_out2i(LISA_LD_D,   &la_t3, &la_env, offsetof(CPUX86State, ptw4k));
+    la_out2i(LISA_LD_D,   &la_t3, &la_env, offsetof(CPUX86State, ptwflags));
     la_out3 (LISA_MASKEQZ, &la_t4, &la_t4, &la_a2);
     la_out3 (LISA_MASKEQZ, &la_t5, &la_t5, &la_a3);
-    la_out3 (LISA_LDX_B,  &la_t4, &la_t3, &la_t4); // ptwdata[paddr0]
-    la_out3 (LISA_LDX_B,  &la_t5, &la_t3, &la_t5); // ptwdata[paddr1]
+    la_out3 (LISA_LDX_B,  &la_t4, &la_t3, &la_t4);
+    la_out3 (LISA_LDX_B,  &la_t5, &la_t3, &la_t5);
+    la_out2i(LISA_ANDI,   &la_a4, &la_t4, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out2i(LISA_ANDI,   &la_a5, &la_t5, HAMT_PTWFLAGS_NOACCESS_MASK);
+    la_out2i(LISA_ANDI,   &la_t4, &la_t4, HAMT_PTWFLAGS_WRITE_MASK);
+    la_out2i(LISA_ANDI,   &la_t5, &la_t5, HAMT_PTWFLAGS_WRITE_MASK);
     /*
      * la_t0 : vaddr
      * la_t1 : haddr 4K page for elo0
      * la_t2 : haddr 4K page for elo1
-     * la_t4 : ptwdata[paddr0>>12] for elo0
-     * la_t5 : ptwdata[paddr1>>12] for elo1
+     * la_t4 : NOWRITE bits for elo0
+     * la_t5 : NOWRITE bits for elo1
+     * la_a4 : NOACCESS bits for elo0
+     * la_a5 : NOACCESS bits for elo1
      * la_a0 : RW for elo0
      * la_a1 : RW for elo1
      * la_a2 : valid for elo0
@@ -1496,24 +1516,22 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2(hamt_excp_t *d)
     la_out2i(LISA_ORI, &la_t7, &la_zero, 0x2); // D(1) in elo1
     la_out3(LISA_MASKEQZ, &la_t6, &la_t6, &la_a0); // if (!rw) D=0
     la_out3(LISA_MASKEQZ, &la_t7, &la_t7, &la_a1);
-    la_out3(LISA_MASKNEZ, &la_t6, &la_t6, &la_t4); // if (!ptwdata) D=0
+    la_out3(LISA_MASKNEZ, &la_t6, &la_t6, &la_t4); // if (NOWRITE) D=0
     la_out3(LISA_MASKNEZ, &la_t7, &la_t7, &la_t5);
     /*
      * la_t0 : vaddr
      * la_t1 : haddr 4K page for elo0
      * la_t2 : haddr 4K page for elo1
-     * la_t4 : ptwdata[paddr0>>12] for elo0
-     * la_t5 : ptwdata[paddr1>>12] for elo1
+     * la_t4 : NOWRITE bits for elo0
+     * la_t5 : NOWRITE bits for elo1
      * la_t6 : D(1) for elo0
      * la_t7 : D(1) for elo1
      * la_a2 : valid for elo0
      * la_a3 : valid for elo1
      */
     la_out2i(LISA_ORI, &la_t3, &la_zero, 0x1); // v(0) in elo
-    la_out2i(LISA_ANDI, &la_t4, &la_t4, 0x1);
-    la_out2i(LISA_ANDI, &la_t5, &la_t5, 0x1);
-    la_out3(LISA_MASKNEZ, &la_t4, &la_t3, &la_t4); // elo0 valid after mmio
-    la_out3(LISA_MASKNEZ, &la_t5, &la_t3, &la_t5); // elo1 valid after mmio
+    la_out3(LISA_MASKNEZ, &la_t4, &la_t3, &la_a4); // elo0 invalid on noaccess
+    la_out3(LISA_MASKNEZ, &la_t5, &la_t3, &la_a5); // elo1 invalid on noaccess
     la_out3(LISA_MASKEQZ, &la_t4, &la_t4, &la_a2); // elo0 valid after PTW
     la_out3(LISA_MASKEQZ, &la_t5, &la_t5, &la_a3); // elo1 valid after PTW
     la_out3(LISA_OR,   &la_a2, &la_t4, &la_t5);
@@ -1784,9 +1802,11 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw(void)
     la_out2i(LISA_SRLI_D, &la_t1, &la_t1, 2);
     la_out2 (LISA_BEQZ,   &la_t1, &ptw_no);
 
-    /* check ptwdata[paddr >> 12] */
-    la_out2i(LISA_LD_D,  &la_t1, &la_env, offsetof(CPUX86State, ptw4k));
+    /* check ptwflags[paddr >> 12] */
+    la_out2i(LISA_LD_D,  &la_t1, &la_env, offsetof(CPUX86State, ptwflags));
     la_out3 (LISA_LDX_B, &la_t7, &la_t1, &la_t4);
+    la_out2i(LISA_ANDI,  &la_t1, &la_t7, HAMT_PTWFLAGS_WRITE_MASK);
+    la_out2i(LISA_ANDI,  &la_t7, &la_t7, HAMT_PTWFLAGS_NOACCESS_MASK);
     la_out2 (LISA_BNEZ,  &la_t7, &ptw_no);
 
     /*
@@ -1809,6 +1829,7 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw(void)
     // if (rw==0) D(1)=0; else D(1)=0x1;
     la_out2i(LISA_ORI,     &la_t3, &la_zero, 0x2);
     la_out3 (LISA_MASKEQZ, &la_t3, &la_t3, &la_t6);
+    la_out3 (LISA_MASKNEZ, &la_t3, &la_t3, &la_t1); // if (NOWRITE) D=0
     la_out3 (LISA_OR,      &la_t2, &la_t2, &la_t3);
 
     // elo0 = (bit12 == 0) ? haddr : zero
@@ -2012,9 +2033,9 @@ void latxs_gen_hamt_excp(hamt_excp_t *d)
     if (need_ptw && hamt_use_ptw_inrefill()) {
         code = d->subcodebase;
         latxs_tr_begin(code);
-        if (hamt_use_ptw_inrefill_4K1()) {
-            if (d->verbose) printf("build hamt tlbrefill ptw 4k1 at %p\n", code);
-            __latxs_gen_hamt_excp_tlbrefill_hamt_ptw();
+        if (hamt_use_ptw_inrefill_4K2M_ptwflags()) {
+            if (d->verbose) printf("build hamt tlbrefill ptw 4k2M ptwflags at %p\n", code);
+            __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(d);
         } else if (hamt_use_ptw_inrefill_4K2()) {
             if (d->verbose) printf("build hamt tlbrefill ptw 4k2 at %p\n", code);
             __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2(d);

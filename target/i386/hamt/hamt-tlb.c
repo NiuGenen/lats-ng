@@ -225,9 +225,9 @@ void hamt_set_tlb_simple(uint64_t ehi,
     }
 }
 
-void hamt_flush_tlb_all(void)
+void hamt_flush_tlb_cpu(CPUState *cpu)
 {
-    CPUX86State *env = current_cpu->env_ptr;
+    CPUX86State *env = cpu->env_ptr;
 
     if (option_pcid_asid) {
         env->pcid_valid = 0;
@@ -235,6 +235,11 @@ void hamt_flush_tlb_all(void)
         env->hamt_large_page_bits = 0;
     }
     local_flush_tlb_all();
+}
+
+void hamt_flush_tlb_all(void)
+{
+    hamt_flush_tlb_cpu(current_cpu);
 }
 
 void hamt_flush_tlb_page(uint64_t vaddr)

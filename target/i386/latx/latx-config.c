@@ -162,15 +162,15 @@ void latx_lsenv_init(CPUArchState *env)
 
 #ifdef CONFIG_SOFTMMU
     if (hamt_use_ptw()) {
-        env->ptw4k = hamt_get_ptwdata();
         env->ptw1m = hamt_get_ptwdata1m();
+        env->ptwflags = hamt_get_ptwflags();
     }
 #endif
 #ifdef CONFIG_LATX_PRINT
-    printf("%s:%d env %p maps of ptw4k %p\n", __func__, __LINE__,
-            env, env->ptw4k);
     printf("%s:%d env %p maps of ptw1m %p\n", __func__, __LINE__,
             env, env->ptw1m);
+    printf("%s:%d env %p maps of ptwflags %p mode %d\n", __func__, __LINE__,
+            env, env->ptwflags, hamt_use_ptw_inrefill_4K2M_ptwflags());
 #endif
     xtm_capstone_init();
 

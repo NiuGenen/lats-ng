@@ -77,7 +77,7 @@ static inline int hamt_use_ptw(void) {
 static inline int hamt_use_ptw_inrefill(void) {
     return option_hamt_config & 0xC0;
 }
-static inline int hamt_use_ptw_inrefill_4K1(void) {
+static inline int hamt_use_ptw_inrefill_4K2M_ptwflags(void) {
     return (option_hamt_config & 0xC0) == (0x1 << 6);
 }
 static inline int hamt_use_ptw_inrefill_4K2(void) {

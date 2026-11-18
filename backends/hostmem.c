@@ -360,7 +360,7 @@ host_memory_backend_memory_prepare(HostMemoryBackend *backend, Error **errp)
         if (backend->latx_role == LATX_BACKEND_GUEST_RAM &&
             sz > latx_memory_backend_size) {
             latx_memory_backend_size = sz;
-            hamt_realloc_ptwdata(sz);
+            hamt_realloc_ptwdata1m(sz);
         }
 
 #if defined(CONFIG_LATX_PRINT)

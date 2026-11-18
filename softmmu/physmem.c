@@ -177,11 +177,6 @@ struct DirtyBitmapSnapshot {
     unsigned long dirty[];
 };
 
-uint8_t *dirty_bitmap_snapshot_get_dirty(DirtyBitmapSnapshot *snap);
-uint8_t *dirty_bitmap_snapshot_get_dirty(DirtyBitmapSnapshot *snap) {
-    return (uint8_t*)(snap->dirty);
-}
-
 static void phys_map_node_reserve(PhysPageMap *map, unsigned nodes)
 {
     static unsigned alloc_hint = 16;
@@ -979,9 +974,7 @@ DirtyBitmapSnapshot *cpu_physical_memory_snapshot_and_clear_dirty
         tlb_reset_dirty_range_all(start, length);
 #ifdef CONFIG_LATX_HACK_MEM
         if (client == DIRTY_MEMORY_VGA && !hamt_no_vga_dirty()) {
-            hamt_ptwdata_vga_snapshot(mr->addr + offset, length,
-                    dirty_bitmap_snapshot_get_dirty(snap));
-            hamt_ptwdata_vga_protect(mr->addr + offset, length);
+            hamt_ptwflags_vga_protect(mr->addr + offset, length);
         }
 #endif
     }
@@ -2796,7 +2789,7 @@ static void invalidate_and_set_dirty(MemoryRegion *mr, hwaddr addr,
 
 #ifdef CONFIG_LATX_HACK_MEM
     if (latx_hack_gpa_in_ram(addr)) {
-        if (hamt_ptwdata_smc_range_is_protected(addr, length)) {
+        if (hamt_ptwflags_smc_range_is_protected(addr, length)) {
             tb_invalidate_phys_range(addr, addr + length - 1);
         }
         return;
