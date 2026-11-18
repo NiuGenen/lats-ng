@@ -105,12 +105,16 @@ static inline void __local_flush_tlb_all(void)
 }
 static inline void local_flush_tlb_all(void)
 {
-    disable_pg();
+    if (!hamt_dmw_mode_da()) {
+        disable_pg();
+    }
     /* invtlb 0x3 : flush guest all TLB that G=0 */
     __asm__ __volatile__(
         ".word ((0x6498000) | (0 << 10) | (0 << 5) | 0x3)\n\t"
         );
-    enable_pg();
+    if (!hamt_dmw_mode_da()) {
+        enable_pg();
+    }
     latx_mem_clear_hpet_vpages();
 }
 
@@ -153,6 +157,10 @@ bool hamt_switch_pcid(CPUX86State *env, uint64_t cr3, bool noflush)
         }
     }
     env->hamt_guest_asid = asid;
+    if (hamt_dmw_mode_da()) {
+        /* DA ignores ASID, so publish the next PG context here. */
+        write_csr_asid(asid);
+    }
     latx_mem_clear_hpet_vpages();
     return true;
 }
@@ -171,11 +179,15 @@ void hamt_set_tlb_simple(uint64_t ehi,
         write_csr_tlbr_elo0(elo0);
         write_csr_tlbr_elo1(elo1);
         tlb_write_random();
-        if (hamt_mode_dmw()) write_csr_asid(0);
+        if (hamt_mode_dmw() && !hamt_dmw_mode_da()) {
+            write_csr_asid(0);
+        }
         return;
     }
 
-    disable_pg();
+    if (!hamt_dmw_mode_da()) {
+        disable_pg();
+    }
 
     write_csr_tlbehi(ehi);
     if (hamt_mode_dmw()) {
@@ -204,9 +216,13 @@ void hamt_set_tlb_simple(uint64_t ehi,
         tlb_write_random();
     }
 
-    if (hamt_mode_dmw()) write_csr_asid(0);
+    if (hamt_mode_dmw() && !hamt_dmw_mode_da()) {
+        write_csr_asid(0);
+    }
 
-    enable_pg();
+    if (!hamt_dmw_mode_da()) {
+        enable_pg();
+    }
 }
 
 void hamt_flush_tlb_all(void)
@@ -300,7 +316,9 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
     /* tlbwr : tlbfill */
     tlbindex_valid(csr_tlbidx) ? tlb_write_indexed() : tlb_write_random();
 
-    if (hamt_mode_dmw()) write_csr_asid(0);
+    if (hamt_mode_dmw() && !hamt_dmw_mode_da()) {
+        write_csr_asid(0);
+    }
 }
 
 /*
@@ -363,9 +381,13 @@ void hamt_set_tlb(void *env,
 
     tlbindex_valid(csr_tlbidx) ? tlb_write_indexed() : tlb_write_random();
 
-    if (hamt_mode_dmw()) write_csr_asid(0);
+    if (hamt_mode_dmw() && !hamt_dmw_mode_da()) {
+        write_csr_asid(0);
+    }
 
-    enable_pg();
+    if (!hamt_dmw_mode_da()) {
+        enable_pg();
+    }
 }
 
 void hamt_set_hardware_tlb_nocheck(void *env,

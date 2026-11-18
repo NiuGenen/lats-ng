@@ -137,7 +137,7 @@ void dune_kvm_init_csr(struct dune_kvm_cpu *cpu, int mode, int cpuid)
     }
     uint64_t INIT_VALUE_TIMERID = host_cpu;
 
-    uint64_t INIT_VALUE_ASID = 0x0;
+    uint64_t INIT_VALUE_ASID = hamt_dmw_mode_da() ? 0xf : 0x0;
     /*
      * 16 KB / 8 B = 2K = 2048 = 2^11
      * @0 - 10 =  47 ... 38 D3
@@ -182,6 +182,11 @@ void dune_kvm_init_csr(struct dune_kvm_cpu *cpu, int mode, int cpuid)
     }
     dune_info("set kvm attr feature 0x%016lx", kvm_attr_value);
 #endif
+
+    uint64_t INIT_VALUE_CRMD = __INIT_VALUE_CRMD;
+    if (hamt_dmw_mode_da()) {
+        INIT_VALUE_CRMD = __INIT_VALUE_CRMD_DA;
+    }
 
     struct csr_reg one_regs[] = {
         CSR_INIT_REG(CRMD),

@@ -1458,6 +1458,7 @@ int hamt_mmio_inst_type(uint32_t inst)
     case OPC_LD_BU:
     case OPC_LD_HU:
     case OPC_LD_WU:
+    case OPC_LD_D:
     case OPC_ST_B:
     case OPC_ST_H:
     case OPC_ST_W:

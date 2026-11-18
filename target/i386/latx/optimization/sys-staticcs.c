@@ -79,6 +79,7 @@ int gen_latxs_scs_prologue_cfg(
 //            lsenv_offset_of_save_regs(lsenv, ra_reg_num));
 
     if (hamt_enabled()) {
+        latxs_tr_dmw_in_da(&la_a2, &la_a3);
         latxs_tr_dmw_out_fix_asid(NULL);
     }
 
@@ -133,6 +134,7 @@ int gen_latxs_scs_prologue_cfg_nofp(
 //            lsenv_offset_of_save_regs(lsenv, ra_reg_num));
 
     if (hamt_enabled()) {
+        latxs_tr_dmw_in_da(&la_a2, &la_a3);
         latxs_tr_dmw_out_fix_asid(NULL);
     }
 
@@ -162,6 +164,7 @@ int gen_latxs_scs_epilogue_cfg(
 
     if (hamt_enabled()) {
         latxs_tr_dmw_in_fix_asid(&latxs_arg2_ir2_opnd);
+        latxs_tr_dmw_in_pg(&la_a2, &la_a3);
     }
 
 
@@ -220,6 +223,7 @@ int gen_latxs_scs_epilogue_cfg_nofp(
 
     if (hamt_enabled()) {
         latxs_tr_dmw_in_fix_asid(&latxs_arg2_ir2_opnd);
+        latxs_tr_dmw_in_pg(&la_a2, &la_a3);
     }
 
 

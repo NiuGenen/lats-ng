@@ -16,4 +16,10 @@ void latxs_tr_dmw_out_fix_asid(IR2_OPND *tmp);
 void latxs_tr_dmw_in_fix_asid_tmp(IR2_OPND *env);
 void latxs_tr_dmw_out_fix_asid_tmp(void);
 
+void latxs_tr_dmw_in_pg(IR2_OPND *tmp0, IR2_OPND *tmp1);
+void latxs_tr_dmw_in_da(IR2_OPND *tmp0, IR2_OPND *tmp1);
+void latxs_tr_dmw_in_pg_tmp(void);
+void latxs_tr_dmw_in_da_tmp(void);
+
+
 #endif

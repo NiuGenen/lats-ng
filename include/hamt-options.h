@@ -36,6 +36,12 @@ static inline int hamt_mode_hole(void) {
     return option_hamt_mode == 2;
 }
 
+static inline int hamt_dmw_mode_default(void) {
+    return hamt_mode_dmw() && option_hamt_submode == 0;
+}
+static inline int hamt_dmw_mode_da(void) {
+    return hamt_mode_dmw() && option_hamt_submode == 1;
+}
 static inline int hamt_hole_mode_40_8(void) {
     return hamt_mode_hole() && option_hamt_submode == 1;
 }

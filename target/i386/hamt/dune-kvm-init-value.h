@@ -95,9 +95,11 @@
     (CSR_TLBELO_V | CSR_TLBELO_WE | CSR_TLBELO_CCA | CSR_TLBELO_GLOBAL)
 
 // ring 0, disable interrupt, mapping
+#define CRMD_DA 3
 #define CRMD_PG 4
 #define CRMD_IE 2
-#define INIT_VALUE_CRMD ((1<<CRMD_PG) | (1<<CRMD_IE) | (1<<5) | (1<<7))
+#define __INIT_VALUE_CRMD    ((1<<CRMD_PG) | (1<<CRMD_IE) | (1<<5) | (1<<7))
+#define __INIT_VALUE_CRMD_DA ((1<<CRMD_DA) | (1<<CRMD_IE) | (1<<5) | (1<<7))
 
 #define INIT_VALUE_EUEN 0xf
 

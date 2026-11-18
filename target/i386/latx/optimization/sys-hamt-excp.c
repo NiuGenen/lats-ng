@@ -1866,9 +1866,11 @@ static void __latxs_gen_hamt_excp_tlbrefill(hamt_excp_t *d, int *need_ptw)
 
     IR2_OPND hamtspace = la_new_label();
     if (hamt_mode_dmw()) {
-        la_out2(LISA_CSRRD, &la_t0, &la_csr_asid);
-        la_out2i(LISA_ANDI, &la_t0, &la_t0, 0x3ff);
-        la_out2(LISA_BNEZ,  &la_t0, &hamtspace);
+        if (!hamt_dmw_mode_da()) {
+            la_out2(LISA_CSRRD, &la_t0, &la_csr_asid);
+            la_out2i(LISA_ANDI, &la_t0, &la_t0, 0x3ff);
+            la_out2(LISA_BNEZ,  &la_t0, &hamtspace);
+        }
     } else if (hamt_mode_hole()) {
         la_out2(LISA_CSRRD, &la_t0, &la_csr_tlbr_badv);
         if (hamt_hole_mode_48_7f()) {
@@ -1889,14 +1891,16 @@ static void __latxs_gen_hamt_excp_tlbrefill(hamt_excp_t *d, int *need_ptw)
         exit(-1);
     }
 
-    /* ====================================== */
-    /* === dbt space, 1G entry and return === */
-    /* ====================================== */
+    if (!hamt_dmw_mode_da()) {
+        /* ====================================== */
+        /* === dbt space, 1G entry and return === */
+        /* ====================================== */
 #ifdef CONFIG_LATX_PRINT
-    __latxs_counter(d->database, 1, &la_t0, &la_t1, HD_CNT_TLBR_DBT_INDEX);
+        __latxs_counter(d->database, 1, &la_t0, &la_t1, HD_CNT_TLBR_DBT_INDEX);
 #endif
-    __latxs_gen_hamt_excp_tlbrefill_dbt();
-    la_out1(LISA_B, &ereturn);
+        __latxs_gen_hamt_excp_tlbrefill_dbt();
+        la_out1(LISA_B, &ereturn);
+    }
 
     /* ================================== */
     /* === hamt space, need GVA - HVA === */
@@ -2076,9 +2080,11 @@ static void latxs_gen_save_some(void)
     la_out2 (LISA_CSRRD, &la_t1, &la_csr_prmd);
     la_out2i(LISA_ST_D,  &la_t1, &la_t0, PT_PRMD);
     if (hamt_mode_dmw()) {
-        la_out2 (LISA_CSRRD, &la_t1, &la_csr_asid);
-        la_out2i(LISA_ST_D,  &la_t1, &la_t0, PT_ASID);
-        la_out2(LISA_CSRWR, &la_csr_asid, &la_zero);
+        if (!hamt_dmw_mode_da()) {
+            la_out2 (LISA_CSRRD, &la_t1, &la_csr_asid);
+            la_out2i(LISA_ST_D,  &la_t1, &la_t0, PT_ASID);
+            la_out2(LISA_CSRWR, &la_csr_asid, &la_zero);
+        }
     } else {
         assert(hamt_mode_hole());
     }
@@ -2135,8 +2141,15 @@ static void latxs_gen_restore_some(void)
     la_out2i(LISA_LD_D,  &la_t1, &la_t0, PT_PRMD);
     la_out2 (LISA_CSRWR, &la_csr_prmd, &la_t1);
     if (hamt_mode_dmw()) {
-        la_out2i(LISA_LD_D,  &la_t1, &la_t0, PT_ASID);
-        la_out2 (LISA_CSRWR, &la_csr_asid, &la_t1);
+        if (!hamt_dmw_mode_da()) {
+            la_out2i(LISA_LD_D,  &la_t1, &la_t0, PT_ASID);
+            la_out2 (LISA_CSRWR, &la_csr_asid, &la_t1);
+        } else {
+            /* The PG switch uses t0/t1; preserve the database pointer. */
+            la_out2(LISA_CSRWR, &la_csr_ks0, &la_t0);
+            latxs_tr_dmw_in_pg(&la_t0, &la_t1);
+            la_out2(LISA_CSRRD, &la_t0, &la_csr_ks0);
+        }
     } else {
         assert(hamt_mode_hole());
     }
@@ -2188,6 +2201,9 @@ void latxs_gen_hamt_int(hamt_excp_t *d)
 
     /* save t0, t1 */
     latxs_gen_save_t0t1(d, &la_csr_ks0);
+    if (hamt_dmw_mode_da()) {
+        latxs_tr_dmw_in_da(&la_t0, &la_t1);
+    }
     /* load database to t0 */
     la_imm(&la_t0, (uint64_t)d->database);
     la_out2i(LISA_LU52I_D, &la_t0, &la_t0, 0x900);
@@ -2266,6 +2282,9 @@ void latxs_gen_hamt_exception(hamt_excp_t *d)
 
     /* save t0, t1 */
     latxs_gen_save_t0t1(d, &la_csr_ks0);
+    if (hamt_dmw_mode_da()) {
+        latxs_tr_dmw_in_da(&la_t0, &la_t1);
+    }
     /* load database to t0 */
     la_imm(&la_t0, (uint64_t)d->database);
     la_out2i(LISA_LU52I_D, &la_t0, &la_t0, 0x900);
