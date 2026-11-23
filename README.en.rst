@@ -72,67 +72,10 @@ Requirements
   default feature set.
 
 
-Build
-=====
+Build and Run
+=============
 
-Clone the source tree with submodules:
-
-.. code-block:: bash
-
-   git clone --depth=1 --recursive https://github.com/lat-opensource/lats.git
-   cd lats
-
-On Debian or Ubuntu:
-
-.. code-block:: bash
-
-   sudo apt install -y git make gcc g++ pkg-config python3 python3-venv \
-       python3-pip python3-setuptools meson ninja-build libglib2.0-dev \
-       libpixman-1-dev libspice-protocol-dev libspice-server-dev \
-       libsdl2-dev libslirp-dev libusb-1.0-0-dev zlib1g-dev
-
-On Fedora:
-
-.. code-block:: bash
-
-   sudo dnf install -y git make gcc gcc-c++ pkgconf-pkg-config python3 \
-       python3-pip python3-setuptools meson ninja-build glib2-devel \
-       pixman-devel spice-protocol spice-server-devel SDL2-devel \
-       libslirp-devel libusb1-devel zlib-devel
-
-Build the default configuration:
-
-.. code-block:: bash
-
-   ./latxbuild/build.sh -c def
-
-The system-level translator is written to ``build/lats-x86_64``. Use
-``./latxbuild/build.sh -c rel`` for a release build or
-``./latxbuild/build.sh -c dbg`` for a debug build. Run the script with ``-h``
-to list the other configurations.
-
-
-Run
-===
-
-Disable the host SFB before using HAMT:
-
-.. code-block:: bash
-
-   sudo sh -c 'echo 0 > /sys/kernel/debug/loongarch/sfb_state'
-
-Start an x86 guest:
-
-.. code-block:: bash
-
-   ./build/lats-x86_64 -hda /path/to/disk.img -m 8192 -smp 4
-
-If the host kernel does not support HAMT, disable it explicitly:
-
-.. code-block:: bash
-
-   ./build/lats-x86_64 -hda /path/to/disk.img -m 8192 -smp 4 \
-       -latx select,hamt=0
+See the `build and run guide <docs/build-and-run.md>`_ for details.
 
 
 Documentation and Feedback
@@ -141,7 +84,6 @@ Documentation and Feedback
 - `Issue tracker <https://github.com/lat-opensource/lats/issues>`_
 - `Contributing guide <CONTRIBUTING.md>`_
 - `Contributor list <CONTRIBUTORS.md>`_
-- `Build and run guide <docs/build-and-run.md>`_
 
 
 License

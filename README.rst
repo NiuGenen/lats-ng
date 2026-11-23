@@ -67,66 +67,10 @@ LATS 基于 QEMU 8.1.5 release 开发并进行深度优化，性能相较原生 
   SPICE、SDL2、slirp、libusb 开发包。实际依赖取决于配置选项。
 
 
-编译
-====
+编译和运行
+==========
 
-克隆源码并初始化子模块：
-
-.. code-block:: bash
-
-   git clone --depth=1 --recursive https://github.com/lat-opensource/lats.git
-   cd lats
-
-Debian / Ubuntu 可安装以下构建依赖：
-
-.. code-block:: bash
-
-   sudo apt install -y git make gcc g++ pkg-config python3 python3-venv \
-       python3-pip python3-setuptools meson ninja-build libglib2.0-dev \
-       libpixman-1-dev libspice-protocol-dev libspice-server-dev \
-       libsdl2-dev libslirp-dev libusb-1.0-0-dev zlib1g-dev
-
-Fedora 可安装：
-
-.. code-block:: bash
-
-   sudo dnf install -y git make gcc gcc-c++ pkgconf-pkg-config python3 \
-       python3-pip python3-setuptools meson ninja-build glib2-devel \
-       pixman-devel spice-protocol spice-server-devel SDL2-devel \
-       libslirp-devel libusb1-devel zlib-devel
-
-默认构建：
-
-.. code-block:: bash
-
-   ./latxbuild/build.sh -c def
-
-生成的系统级翻译器位于 ``build/lats-x86_64``。发布构建可使用
-``./latxbuild/build.sh -c rel``，调试构建可使用
-``./latxbuild/build.sh -c dbg``。其他配置通过 ``-h`` 查看。
-
-
-运行
-====
-
-使用 HAMT 前先关闭宿主 SFB：
-
-.. code-block:: bash
-
-   sudo sh -c 'echo 0 > /sys/kernel/debug/loongarch/sfb_state'
-
-然后启动 x86 客户机：
-
-.. code-block:: bash
-
-   ./build/lats-x86_64 -hda /path/to/disk.img -m 8192 -smp 4
-
-若宿主内核不支持 HAMT，可显式关闭：
-
-.. code-block:: bash
-
-   ./build/lats-x86_64 -hda /path/to/disk.img -m 8192 -smp 4 \
-       -latx select,hamt=0
+详见 `编译和运行指南 <docs/build-and-run.md>`_。
 
 
 文档与反馈
@@ -135,7 +79,6 @@ Fedora 可安装：
 - `问题反馈 <https://github.com/lat-opensource/lats/issues>`_
 - `贡献指南 <CONTRIBUTING.md>`_
 - `贡献者名单 <CONTRIBUTORS.md>`_
-- `编译和运行 <docs/build-and-run.md>`_
 
 
 许可证
