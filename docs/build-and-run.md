@@ -147,8 +147,11 @@ sudo rmmod hamt_pm
 
 ### 开启 TSO
 
-运行 Windows 10 及更高版本的客户机时，建议开启 TSO（Total Store Order），
-以获得更好的内存模型兼容性和运行稳定性。
+TSO 仅支持 LA664（3A6000）系列及更新的处理器。LA464（3A5000）等此前处理器
+不支持 TSO 功能。
+
+在支持 TSO 的处理器上，运行 Windows 10 及更高版本的客户机时，建议开启 TSO
+（Total Store Order），以获得更好的内存模型兼容性和运行稳定性。
 
 ABI2.0 系统优先通过内核 debugfs 接口开启。默认状态为 `3`，写入 `5` 后启用：
 
