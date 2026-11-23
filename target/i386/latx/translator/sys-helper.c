@@ -187,6 +187,10 @@ static void gen_helper_prologue(helper_cfg_t cfg, bool use_static)
 
     latxs_ras_tp_enter_c();
 
+    if (hamt_enabled()) {
+        latxs_tr_dmw_in_plv0_break();
+    }
+
     /* Hardware $fcsr0 carries live guest MXCSR/FPU state across C helpers
      * (matching gen_latxs_scs_prologue_cfg); sc_prologue never populates
      * sp+128, so inline prologues/epilogues must not reload $fcsr0. */
@@ -252,6 +256,7 @@ static void gen_helper_epilogue(helper_cfg_t cfg, bool use_static)
     if (hamt_enabled()) {
         latxs_tr_dmw_in_fix_asid_tmp(&latxs_env_ir2_opnd);
         latxs_tr_dmw_in_pg_tmp();
+        latxs_tr_dmw_in_plv_env_tmp(&latxs_env_ir2_opnd);
     }
 
     if ((!option_soft_fpu) && unlikely(cfg.cfg.cvt_fp80)) {

@@ -1693,6 +1693,7 @@ void tlb_set_page_full(CPUState *cpu, int mmu_idx,
     paddr_page = full->phys_addr & TARGET_PAGE_MASK;
 
     prot = full->prot;
+    HAMT_PROT_DEL_PLV(prot);
     asidx = cpu_asidx_from_attrs(cpu, full->attrs);
     section = address_space_translate_for_iotlb(cpu, asidx, paddr_page,
                                                 &xlat, &sz, full->attrs, &prot);
@@ -1918,6 +1919,7 @@ static void tlb_set_page_full_fast(CPUState *cpu, int mmu_idx,
     full = &desc->fulltlb[index];
     full->attrs = attrs;
     full->prot = prot;
+    full->prot32 = prot;
     full->lg_page_size = ctz64(size);
     full->xlat_section = iotlb - addr_page;
     full->phys_addr = paddr_page;
@@ -1965,6 +1967,7 @@ void tlb_set_page_with_attrs(CPUState *cpu, vaddr addr,
         .phys_addr = paddr,
         .attrs = attrs,
         .prot = prot,
+        .prot32 = prot,
         .lg_page_size = ctz64(size)
     };
 

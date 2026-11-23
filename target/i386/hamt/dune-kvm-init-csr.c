@@ -119,6 +119,9 @@ void dune_kvm_init_csr(struct dune_kvm_cpu *cpu, int mode, int cpuid)
     }
 
     uint64_t INIT_VALUE_DMWIN1 = CSR_DMW1_INIT;
+    if (hamt_enable_plv()) {
+        INIT_VALUE_DMWIN1 = CSR_DMW1_INIT_PLV_ALL;
+    }
     uint64_t INIT_VALUE_KSCRATCH5 = (uint64_t)cpu->syscall_parameter + CSR_DMW1_BASE;
     uint64_t INIT_VALUE_KSCRATCH6 = TLBRELO0_STANDARD_BITS;
     uint64_t INIT_VALUE_KSCRATCH7 = TLBRELO1_STANDARD_BITS;
