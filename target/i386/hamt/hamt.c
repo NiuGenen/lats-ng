@@ -2286,14 +2286,27 @@ void restore_prmd(int cpuid)
 
 void loongarch_ertn(void)
 {
-   __asm__ volatile (
-        "csrwr %0, 0x6\n\t"
+    uint64_t resume;
+
+    if (hamt_dmw_mode_da()) {
+        uint64_t mode = CSR_CRMD_DA;
+
+        /* cpu_loop_exit() returns to C, not to the faulting instruction. */
+        __asm__ volatile (
+            "csrxchg %[mode], %[mask], %[crmd]\n\t"
+            : [mode] "+r" (mode)
+            : [mask] "r" (CSR_CRMD_DA | CSR_CRMD_PG),
+              [crmd] "i" (LOONGARCH_CSR_CRMD)
+            : "memory");
+    }
+    /* Keep the return address local to each emitted ERTN. */
+    __asm__ volatile (
+        "la.local %[resume], 1f\n\t"
+        "csrwr %[resume], 0x6\n\t"
         "ertn\n"
-        : : "r"(&&end)
-        : "memory"
-    );
-end:
-    return;
+        "1:"
+        : [resume] "=r" (resume)
+        : : "memory");
 }
 
 /* Called only after the exception entry has saved the host vector state. */

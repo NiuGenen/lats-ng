@@ -403,6 +403,7 @@ static int gen_latxs_sc_prologue(void *code_ptr)
         latxs_tr_dmw_in_fix_mem(&la_a0);
         latxs_tr_dmw_in_fix_mem(&la_a1);
         latxs_tr_dmw_in_fix_asid_tmp(&la_a1);
+        latxs_tr_dmw_in_pg_tmp();
     }
 
     /* 1. save DBT's context in stack, so allocate space on the stack */
@@ -588,6 +589,7 @@ static int gen_latxs_sc_epilogue(void *code_ptr)
 
     if (hamt_enabled()) {
         latxs_tr_dmw_out_fix_mem(&la_sp);
+        latxs_tr_dmw_in_da_tmp();
         latxs_tr_dmw_out_fix_asid(NULL);
     }
 
