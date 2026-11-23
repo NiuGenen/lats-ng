@@ -8,6 +8,54 @@ LATS welcomes bug fixes, compatibility improvements, performance work, tests,
 and documentation. Search existing issues before starting. For a large feature
 or architectural change, open an issue first to discuss scope and design.
 
+## 提交 Issue / Reporting Issues
+
+欢迎提交 Issue。清晰的问题报告、复现步骤和验证结果同样是项目的重要贡献。
+
+提交客户机问题或运行错误时，请尽量提供：
+
+- 测试环境：LATS commit、宿主操作系统、内核、KVM 及相关依赖版本。
+- 测试节点：宿主 CPU 型号、内存容量、CPU/NUMA 绑定等与问题有关的配置。
+- 运行参数：完整启动命令，包括 `-M`、`-m`、`-smp`、`-cpu`、`-display`、
+  `-latx`、`LATS_OPT` 等参数。
+- 镜像或 ISO：客户机类型和版本、镜像格式、获取或生成方式、必要固件或驱动，
+  以及可公开的哈希值。
+- 问题现象、预期结果、完整日志和必要的截图。
+
+镜像或日志无法公开时，请提供可复现的镜像构造方法、关键配置和哈希，避免上传
+敏感数据或无授权的软件。
+
+如果客户机内部运行出错，建议首先在 x86 机器上使用同一镜像或 ISO，通过
+QEMU/KVM 进行对照测试。请尽量保持相同的虚拟硬件、固件和设备配置，并在 Issue
+中说明 x86/QEMU-KVM 的测试结果，用于判断问题是否与 LATS 相关。若问题仅在
+LATS 上复现，请同时提供两种环境下的配置和日志。
+
+Clear issue reports, reproduction steps, and validation results are valuable
+contributions to the project.
+
+When reporting a guest or runtime problem, include as much of the following as
+possible:
+
+- Test environment: LATS commit, host OS, kernel, KVM, and relevant dependency
+  versions.
+- Test node: host CPU model, memory size, CPU/NUMA affinity, and other relevant
+  host configuration.
+- Runtime parameters: the complete launch command, including `-M`, `-m`,
+  `-smp`, `-cpu`, `-display`, `-latx`, `LATS_OPT`, and related options.
+- Image or ISO: guest type and version, image format, how it was obtained or
+  built, required firmware or drivers, and public hashes where available.
+- Observed behavior, expected behavior, complete logs, and relevant screenshots.
+
+If an image or log cannot be shared publicly, provide reproducible build steps,
+key configuration, and hashes instead of uploading sensitive data or
+unauthorized software.
+
+For errors occurring inside the guest, first reproduce the issue on an x86 host
+with QEMU/KVM using the same image or ISO. Keep the virtual hardware, firmware,
+and device configuration as similar as possible, and report the x86/QEMU-KVM
+result. If the issue reproduces only with LATS, include the configuration and
+logs from both environments.
+
 ## 开发流程 / Workflow
 
 1. Fork `lat-opensource/lats`，并从 `main` 创建独立主题分支。
