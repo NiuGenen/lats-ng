@@ -45,6 +45,7 @@
 #include "hamt-internal.h"
 #include "hamt-options.h"
 #include "hamt-tlb.h"
+#include "hamt-smc-bitmap.h"
 #include "hamt-ptw-internal.h"
 #include "hamt-data.h"
 #include "hamt-exccode.h"
@@ -972,6 +973,7 @@ static int hamt_fill_hardware_tlb(CPUX86State *env,
     int prot = 0;
     int plv = 0;
     int is_tlb_notdirty = 0;
+    bool bitmap_tracked = false;
 
     if (hamt_enable_plv()) HAMT_PROT_GET_PLV(full->prot32, plv);
 
@@ -985,6 +987,36 @@ static int hamt_fill_hardware_tlb(CPUX86State *env,
 
     if (flags_r) prot &= ~PROT_READ;
     if (flags_w) prot &= ~PROT_WRITE;
+
+    if (!prot) return 0;
+
+    bitmap_tracked = (full->phys_addr >> TARGET_PAGE_BITS) <
+                     hamt_get_ptwflags_size() &&
+                     paddr >= HACK_RAMBASE &&
+                     ((paddr - HACK_RAMBASE) & TARGET_PAGE_MASK) ==
+                     (full->phys_addr & TARGET_PAGE_MASK);
+    if (hamt_smc_bitmap_enabled()) {
+        /* Without an attributable RAM page we cannot recheck its SMC
+         * state after an IPI interrupted the fill. Keep it on the slow path. */
+        if (!bitmap_tracked) {
+            return 0;
+        }
+        if (!option_smc_bitmap_rw || (prot & PROT_WRITE)) {
+            hamt_smc_bitmap_mark(hamt_smc_bitmap_get(), full->phys_addr,
+                                 12, current_cpu->cpu_index);
+        }
+        hamt_smc_bitmap_publish();
+    }
+
+    if (bitmap_tracked) {
+        uint8_t f = hamt_ptwflags_get_page(full->phys_addr);
+        if (f & HAMT_PTWFLAGS_NOACCESS_MASK) {
+            prot = 0;
+        } else if (f & HAMT_PTWFLAGS_NOWRITE) {
+            prot &= ~PROT_WRITE;
+            flags_w |= TLB_NOTDIRTY;
+        }
+    }
 
     if (!prot) return 0;
 
@@ -1006,6 +1038,23 @@ static int hamt_fill_hardware_tlb(CPUX86State *env,
     }
     if (do_fill_tlb) {
         hamt_set_hardware_tlb_nocheck(env, addr, paddr, prot, 0);
+        if (bitmap_tracked) {
+            /* Republish if an IPI cleared the mark before the TLB write. */
+            if (hamt_smc_bitmap_enabled() &&
+                (!option_smc_bitmap_rw || (prot & PROT_WRITE))) {
+                hamt_smc_bitmap_mark(hamt_smc_bitmap_get(), full->phys_addr,
+                                     12, current_cpu->cpu_index);
+            }
+            hamt_smc_bitmap_publish();
+            uint8_t f = hamt_ptwflags_get_page(full->phys_addr);
+            if ((f & HAMT_PTWFLAGS_NOACCESS_MASK) ||
+                ((f & HAMT_PTWFLAGS_NOWRITE) && (prot & PROT_WRITE))) {
+                hamt_flush_tlb_all();
+                do_fill_tlb = 0;
+                prot &= ~PROT_WRITE;
+                flags_w |= TLB_NOTDIRTY;
+            }
+        }
     }
 
     is_tlb_notdirty = (flags_w & TLB_NOTDIRTY) ? 1 : 0;

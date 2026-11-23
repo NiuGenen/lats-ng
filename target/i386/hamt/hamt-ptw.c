@@ -38,6 +38,7 @@
 
 #include "hamt-ptw.h"
 #include "hamt-ptw-internal.h"
+#include "hamt-smc-bitmap.h"
 #include "hamt-hostmem.h"
 
 #include "loongarch-csr.h"
@@ -220,6 +221,26 @@ static void __attribute__((__constructor__)) hamt_ptw_init(void)
     ptwdata1m = hamt_new_ptwdata1m(HAMT_PTWDATA1M_SIZE);
     ptwflags = hamt_new_ptwflags(HAMT_PTWFLAGS_SIZE);
     hamt_ptwflags_init();
+}
+
+static HamtSmcBitmap smc_bitmap;
+static pthread_once_t smc_bitmap_once = PTHREAD_ONCE_INIT;
+
+static void hamt_smc_bitmap_init_shared(void)
+{
+    if (!hamt_smc_bitmap_init(&smc_bitmap, ptwflags_size)) {
+        fprintf(stderr, "HAMT: SMC bitmap allocation failed; using full flush\n");
+    } else if (!HAMT_HOLE_ASSERT(smc_bitmap.vcpu[0].words) ||
+               !HAMT_HOLE_ASSERT(smc_bitmap.page1m)) {
+        hamt_smc_bitmap_destroy(&smc_bitmap);
+        fprintf(stderr, "HAMT: SMC bitmap address unsuitable; using full flush\n");
+    }
+}
+
+HamtSmcBitmap *hamt_smc_bitmap_get(void)
+{
+    pthread_once(&smc_bitmap_once, hamt_smc_bitmap_init_shared);
+    return &smc_bitmap;
 }
 
 void hamt_realloc_ptwdata1m(uint64_t size)
@@ -648,6 +669,15 @@ do_check_protect:
     paddr = (pte & PG_ADDRESS_MASK & ~(page_size - 1)) | (addr & (page_size - 1));
     haddr = paddr + rambase;
 
+    /* The C walker installs a 4K hardware entry even for a large x86 page. */
+    if (hamt_smc_bitmap_enabled()) {
+        if (!option_smc_bitmap_rw || (prot & PAGE_WRITE)) {
+            hamt_smc_bitmap_mark(hamt_smc_bitmap_get(), paddr, 12,
+                                 current_cpu->cpu_index);
+        }
+        hamt_smc_bitmap_publish();
+    }
+
     uint8_t ptwflags = hamt_ptwflags_get_page(paddr);
 
     if (page_size > TARGET_PAGE_SIZE &&
@@ -708,6 +738,21 @@ do_check_protect:
                                      ? hamt_large_page_bit(addr) : UINT32_MAX;
     }
     hamt_set_hardware_tlb_nocheck(env, addr, haddr, prot, 0);
+    if (hamt_smc_bitmap_enabled()) {
+        /*
+         * An IPI can invalidate and clear a pre-fill mark before this fill.
+         * Publish the completed fill before rechecking the page permission.
+         */
+        if (!option_smc_bitmap_rw || (prot & PAGE_WRITE)) {
+            hamt_smc_bitmap_mark(hamt_smc_bitmap_get(), paddr, 12,
+                                 current_cpu->cpu_index);
+        }
+    }
+    /* A protection IPI can precede the fill even without the bitmap. */
+    hamt_smc_bitmap_publish();
+    if (hamt_ptwflags_get_page(paddr) & HAMT_PTWFLAGS_WRITE_MASK) {
+        hamt_flush_tlb_all();
+    }
     return true;
 
 do_fault_rsvd:

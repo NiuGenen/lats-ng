@@ -26,6 +26,7 @@ void hamt_ptwflags_invalidate_all(void);
 
 struct CPUState;
 void hamt_ptwflags_sync_tlb(struct CPUState *cpu);
+void hamt_smc_resume_flush(struct CPUState *cpu);
 
 bool hamt_ptwflags_smc_page_is_protected(uint64_t page);
 bool hamt_ptwflags_smc_range_is_protected(uint64_t base, uint64_t size);

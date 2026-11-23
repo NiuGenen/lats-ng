@@ -152,6 +152,9 @@ int option_pcid;
 int option_pcid_asid;
 int option_pcid_cache;
 int option_pcid_stats;
+int option_smc_bitmap;
+int option_smc_bitmap_rw;
+int option_smc_bitmap_flush;
 int option_aes_opt;
 int option_enable_lasx;
 
@@ -747,6 +750,18 @@ QemuOptsList qemu_latx_opts = {
             .type = QEMU_OPT_BOOL,
             .help = "count guest PCID use and ASID retention (info jit)",
         }, {
+            .name = "smcbitmap",
+            .type = QEMU_OPT_BOOL,
+            .help = "enable per-vCPU SMC TLB bitmap (experimental)",
+        }, {
+            .name = "smcbitmaprw",
+            .type = QEMU_OPT_BOOL,
+            .help = "track only writable TLB entries in the SMC bitmap",
+        }, {
+            .name = "smcbitmapflush",
+            .type = QEMU_OPT_BOOL,
+            .help = "clear the SMC bitmap after hardware TLB invalidation",
+        }, {
             .name = "fastitlbptw",
             .type = QEMU_OPT_BOOL,
             .help = "ptw support for fast instruction TLB",
@@ -1221,6 +1236,10 @@ static void latxs_arch_options_check(void)
 
 static void latx_sys_check_options(void)
 {
+    if (option_smc_bitmap && (!hamt_enabled() || !hamt_smc_bitmap_enabled())) {
+        warn_report("smcbitmap disabled: requires HAMT DA, C or 4K/2M PTW, synchronous IPI and no PGD");
+        option_smc_bitmap = 0;
+    }
     if (option_pcid &&
         (!hamt_enabled() || !hamt_mode_dmw() || hamt_disable_asid() ||
          !hamt_do_taskset())) {
@@ -1616,6 +1635,9 @@ void latx_parse_options(QemuOpts *opts)
     parse_options_bool("pcidasid", option_pcid_asid);
     parse_options_bool("pcidcache", option_pcid_cache);
     parse_options_bool("pcidstats", option_pcid_stats);
+    parse_options_bool("smcbitmap", option_smc_bitmap);
+    parse_options_bool("smcbitmaprw", option_smc_bitmap_rw);
+    parse_options_bool("smcbitmapflush", option_smc_bitmap_flush);
     parse_options_bool("tableaddr", option_table_addr);
     parse_options_bool("newassembal", option_new_assemble);
     parse_options_bool("staticcs", option_staticcs);
@@ -2386,6 +2408,9 @@ void latxs_options_init(void)
     option_pcid = 1;
     option_pcid_asid = 1;
     option_pcid_cache = 1;
+    option_smc_bitmap = 1;
+    option_smc_bitmap_rw = 0;
+    option_smc_bitmap_flush = 1;
     option_htimer = 0;
     option_irq_gate_nobql = 1;
 #else

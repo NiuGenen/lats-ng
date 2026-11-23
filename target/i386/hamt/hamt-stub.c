@@ -71,6 +71,10 @@ void hamt_flush_tlb_page(uint64_t vaddr)
 {
 }
 
+void hamt_smc_resume_flush(struct CPUState *cpu)
+{
+}
+
 void hamt_protect_code(uint64_t guest_phys_page, int full)
 {
 }

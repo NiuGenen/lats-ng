@@ -43,11 +43,8 @@ python3 tests/tcg/i386/latx-aot/ptwflags-guest/run-linux.py \
 The default LATS configuration is `hamtconfig=0x3769` with AOT, TU (`tumode`)
 and `tucpopt` disabled. This selects the unified ptwflags 4K/2M refill path and
 enables PLV tagging.
-The guest suite defaults to one vCPU. Booting this unified ptwflags
-configuration with more than one vCPU currently stops after all vCPU threads
-enter HAMT, before guest serial output. The host-side safety test separately
-stresses concurrent protect/unprotect and MMIO invalidation; resolving the SMP
-boot path remains a separate architectural issue.
+The guest permission suite defaults to one vCPU; the separate SMP SMC test
+below exercises four vCPUs.
 The runner requires each case marker and the expected x86 page-fault error codes
 `5` (user read), `6` (not-present user write), `7` (present user write), and
 `15` (user instruction fetch).
@@ -56,3 +53,42 @@ The reserved permission bits 2 through 6 do not have a natural guest producer;
 they are covered by the production-state harness in
 `test-hamt-ptwflags.py` and by the emitted refill checks in
 `test-hamt-ptwdata1m.py`.
+
+## SMP SMC stress
+
+`smc-smp-stress.c` requires an x86 Linux guest with four online CPUs and a C
+compiler with pthreads. It pins the writer to CPU 0 and three executors to
+CPUs 1-3. Each of 5,000 rounds writes a new return value and then lets all
+three CPUs execute the page. Barriers separate modification and execution.
+The `alias` mode maps the same backing page at separate writable and
+executable addresses. The `huge` mode requires a 2 MiB transparent huge
+page and cycles through its 512 constituent 4 KiB pages. It checks
+`AnonHugePages` in `/proc/self/smaps` and fails if the allocation did not
+become a huge page.
+
+Inside the guest, build and run the cases:
+
+```sh
+gcc -std=gnu11 -O2 -Wall -Wextra -Werror -pthread smc-smp-stress.c -o smc-smp-stress
+./smc-smp-stress
+./smc-smp-stress alias
+./smc-smp-stress huge
+```
+
+The bitmap remains experimental. Use `hamtconfig=0x3729,smcbitmap=on` for
+the C-only walker or `hamtconfig=0x3769,smcbitmap=on` to include the
+generated 4K/2M refill walker. Use `aotsys=0,tumode=off,tucpopt=off` to
+isolate JIT-TB tests.
+
+`smcbitmap` defaults to on for supported HAMT configurations and is disabled
+with a warning for unsupported configurations.
+`smcbitmaprw` defaults to off and records all valid entries; on records only
+entries eligible for writes. `smcbitmapflush`
+defaults to on and clears the owning vCPU's bitmap after a full hardware TLB
+invalidation, not after a partial ASID or page invalidation. Unsupported HAMT
+configurations do not enable the selective bitmap path.
+
+The `HAMT SMC bitmap` exit counters describe candidate and selected target
+requests, not the number of hardware instructions executed. The separate
+`HAMT TLB full invalidations` counters cover instrumented local and IPI full
+invalidations only; they do not count partial invalidations.

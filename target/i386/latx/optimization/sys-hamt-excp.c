@@ -24,8 +24,10 @@
 #include "loongarch-extcontext.h"
 #include "hamt-data.h"
 #include "hamt-internal.h"
+#include "hamt-dmw.h"
 #include "hamt-ptw.h"
 #include "hamt-tlb.h"
+#include "hamt-interrupt.h"
 #include "hamt-options.h"
 #include "hamt-entry-func.h"
 
@@ -92,34 +94,91 @@ static void __latxs_gen_hamt_interrupt_ipi(hamt_excp_t *d)
         la_out2(LISA_CSRWR, &la_csr_ks1, &la_t3);
     }
 
+    if (hamt_enable_ipi_sync()) {
+        /* Snapshot and clear requests before invalidation. A request arriving
+         * after this snapshot must not be acknowledged by this invalidation:
+         * its protection may have been published after the invalidation. */
+        la_out1i(LISA_LU12I_W, &la_t1, 0x1);
+        la_outa(LISA_DUP, 0x06480800 | (13 << 5) | (12 << 0));
+        la_out3(LISA_OR, &la_t3, &la_t0, &la_zero);
+        la_out1i(LISA_LU12I_W, &la_t1, 0x1);
+        la_out2i(LISA_ORI, &la_t1, &la_t1, 0xc);
+        /* iocsrwr.w t3, t1: IPI_CLEAR = observed IPI_STATUS */
+        la_outa(LISA_DUP, 0x06481800 | (13 << 5) | (15 << 0));
+        la_outi(LISA_DBAR, 0);
+
+        /* Snapshot each observed sender's sequence before invalidation.
+         * A later same-sender request must wait for a later acknowledgement. */
+        IR2_OPND snapshot_loop = la_new_label();
+        IR2_OPND snapshot_done = la_new_label();
+        uint64_t lu32imm = (((uint64_t)d->database2) >> 32) & 0xfffff;
+        la_out2(LISA_BEQZ, &la_t0, &snapshot_done);
+        la_imm(&la_t1, DMW_IN((uintptr_t)d->database2 +
+                              HAMT_IPI_MASK_INDEX * 8));
+        la_out2i(LISA_ST_D, &la_t3, &la_t1, 0);
+        la_label(snapshot_loop);
+        la_out2(LISA_CTZ_D, &la_t2, &la_t0);
+        la_out2i(LISA_ORI, &la_t1, &la_zero, 1);
+        la_out3(LISA_SLL_D, &la_t1, &la_t1, &la_t2);
+        la_out3(LISA_NOR, &la_t1, &la_t1, &la_zero);
+        la_out3(LISA_AND, &la_t0, &la_t0, &la_t1);
+        la_out3(LISA_OR, &la_t3, &la_t2, &la_zero);
+        la_out2i(LISA_SLLI_D, &la_t2, &la_t2, 24);
+        la_out2_(lisa_mov, &la_t1, &la_zero);
+        la_out1i(LISA_LU32I_D, &la_t1, lu32imm);
+        la_out2i(LISA_LU52I_D, &la_t1, &la_t1, 0x900);
+        la_out3(LISA_OR, &la_t1, &la_t1, &la_t2);
+        la_out2i(LISA_LD_D, &la_t2, &la_t1, HAMT_IPI_SEQ_INDEX * 8);
+        la_imm(&la_t1, DMW_IN((uintptr_t)d->database2 +
+                              HAMT_IPI_SNAPSHOT_INDEX * 8));
+        la_out2i(LISA_SLLI_D, &la_t3, &la_t3, 3);
+        la_out3(LISA_STX_D, &la_t2, &la_t1, &la_t3);
+        la_out2(LISA_BNEZ, &la_t0, &snapshot_loop);
+        la_imm(&la_t1, DMW_IN((uintptr_t)d->database2 +
+                              HAMT_IPI_MASK_INDEX * 8));
+        la_out2i(LISA_LD_D, &la_t3, &la_t1, 0);
+        la_label(snapshot_done);
+        la_outi(LISA_DBAR, 0);
+    }
+
     /*0000 0110 0100 1001 1KKK KKJJ JJJO OOOO*/
     /* invtlb 0x3 : flush guest all TLB that G=0 */
     la_outa(LISA_DUP, 0x06498000 | 0x3);
 
+    if (d->smc_bitmap_base && d->smc_bitmap_high_water) {
+        IR2_OPND clear_loop = la_new_label();
+        IR2_OPND clear_done = la_new_label();
+
+        /* Use the guest DMW alias, not the host virtual address. */
+        la_imm(&la_t0, DMW_IN((uintptr_t)d->smc_bitmap_base));
+        la_outi(LISA_DBAR, 0);
+        la_imm(&la_t1, DMW_IN((uintptr_t)d->smc_bitmap_high_water));
+        la_out2i(LISA_LD_D, &la_t1, &la_t1, 0);
+        la_out2(LISA_BEQZ, &la_t1, &clear_done);
+        la_label(clear_loop);
+        la_out2i(LISA_ST_D, &la_zero, &la_t0, 0);
+        la_out2i(LISA_ADDI_D, &la_t0, &la_t0, 8);
+        la_out2i(LISA_ADDI_D, &la_t1, &la_t1, -1);
+        la_out2(LISA_BNEZ, &la_t1, &clear_loop);
+        la_label(clear_done);
+        la_outi(LISA_DBAR, 0);
+    }
+
     if (hamt_enable_ipi_sync()) {
-        /*IOCSRRD.B rd, rj 0000 0110 0100 1000 0000 00JJ JJJD DDDD*/
-        /*IOCSRRD.H rd, rj 0000 0110 0100 1000 0000 01JJ JJJD DDDD*/
-        /*IOCSRRD.W rd, rj 0000 0110 0100 1000 0000 10JJ JJJD DDDD*/
-        /*IOCSRRD.D rd, rj 0000 0110 0100 1000 0000 11JJ JJJD DDDD*/
-        /*
-         * RJ: iocsr addr = T1 : 13 = 0x1000 = IPI_STATUS
-         * RD: val        = T0 : 12 = (1 << source CPU)
-         */
-        la_out1i(LISA_LU12I_W, &la_t1, 0x1);
-        la_outa(LISA_DUP, 0x06480800 | (13<<5) | (12<<0));
-        la_out3(LISA_OR, &la_t3, &la_t0, &la_zero);
-        // la_t0 = 0b0001 from CPU0
-        // la_t0 = 0b0010 from CPU1
-        // la_t0 = 0b0100 from CPU2
-        // la_t0 = 0b1000 from CPU3
-        // la_t0 = 0b1010 from CPU1 and CPU3 !
+        la_outi(LISA_DBAR, 0);
+        /* Clearing may use t0; t3 retains the captured request mask. */
+        la_out3(LISA_OR, &la_t0, &la_t3, &la_zero);
+
         IR2_OPND ipiloop = la_new_label();
+        IR2_OPND ipidone = la_new_label();
+        la_out2(LISA_BEQZ, &la_t0, &ipidone);
         la_label(ipiloop);
         // la_t2 = 0 from CPU0
         // la_t2 = 1 from CPU1
         // la_t2 = 2 from CPU2
         // la_t2 = 3 from CPU3
         la_out2(LISA_CTZ_D, &la_t2, &la_t0);
+        la_out3(LISA_OR, &la_t3, &la_t2, &la_zero);
         la_out2i(LISA_ORI,  &la_t1, &la_zero, 0x1);
         la_out3(LISA_SLL_D, &la_t1, &la_t1, &la_t2);
         la_out3(LISA_NOR,   &la_t1, &la_t1, &la_zero);
@@ -144,27 +203,18 @@ static void __latxs_gen_hamt_interrupt_ipi(hamt_excp_t *d)
         // la_t1 = 0x(7f)8a_3000_0000 from CPU3
         la_out3(LISA_OR, &la_t1, &la_t1, &la_t2);
 
+        la_imm(&la_t2, DMW_IN((uintptr_t)d->database2 +
+                              HAMT_IPI_SNAPSHOT_INDEX * 8));
+        la_out2i(LISA_SLLI_D, &la_t3, &la_t3, 3);
+        la_out3(LISA_LDX_D, &la_t3, &la_t2, &la_t3);
+
         la_out2 (LISA_CSRRD,  &la_t2, &la_csr_cpuid);
         la_out2i(LISA_SLLI_D, &la_t2, &la_t2, 6);
         la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t2);
-
-        la_out2i(LISA_ADDI_D, &la_t2, &la_zero, -1);
-        la_out3(LISA_AMADD_D, &la_zero, &la_t1, &la_t2);
+        la_out2i(LISA_ST_D, &la_t3, &la_t1, 0);
 
         la_out2(LISA_BNEZ, &la_t0, &ipiloop);
-
-    //    la_out2i(LISA_ADDI_D,  &la_t0, &la_zero, -1); // ffffffff
-        la_out1i(LISA_LU12I_W, &la_t1, 0x1);
-        la_out2i(LISA_ORI,     &la_t1, &la_t1, 0xc);
-        /*0000 0110 0100 1000 0001 00JJ JJJD DDDD IOCSRWR.B */
-        /*0000 0110 0100 1000 0001 01JJ JJJD DDDD IOCSRWR.H */
-        /*0000 0110 0100 1000 0001 10JJ JJJD DDDD IOCSRWR.W */
-        /*0000 0110 0100 1000 0001 11JJ JJJD DDDD IOCSRWR.D */
-        /*
-         * RJ: iocsr addr = T1 : 13 = 0x100c = IPI_CLEAR
-         * RD: val        = T3 : 15 = ~(ipi_status)
-         */
-        la_outa(LISA_DUP, 0x06481800 | (13<<5) | (15<<0));
+        la_label(ipidone);
         goto hamt_ipi_sync_done;
     }
 
@@ -183,13 +233,11 @@ static void __latxs_gen_hamt_interrupt_ipi(hamt_excp_t *d)
 
 hamt_ipi_sync_done:
 
-#ifdef CONFIG_LATX_PRINT
     la_imm(&la_t0, (uint64_t)d->database);
     la_out2i(LISA_LU52I_D,&la_t0, &la_t0, 0x900);
     la_out2i(LISA_LD_D,   &la_t1, &la_t0, HD_CNT_IPI_INDEX * 8);
     la_out2i(LISA_ADDI_D, &la_t1, &la_t1, 1);
     la_out2i(LISA_ST_D,   &la_t1, &la_t0, HD_CNT_IPI_INDEX * 8);
-#endif
 
     la_out2(LISA_CSRRD, &la_t0, &la_csr_ks3);
     la_out2(LISA_CSRRD, &la_t1, &la_csr_ks4);
@@ -374,6 +422,55 @@ static void set_hamt_tlbr_plv(IR2_OPND *elo0, IR2_OPND *elo1,
     la_out2i(LISA_ORI, tmp1, &la_zero, 0x3 << 2);
     la_out3(LISA_MASKEQZ, tmp1, tmp1, tmp0);
     la_out3(LISA_OR, elo1, elo1, tmp1);
+}
+
+/* Refill runs with interrupts disabled until ERTN. Publish before reading
+ * ptwflags so a concurrent protector sees either the mark or its own flag. */
+static void gen_hamt_smc_mark(hamt_excp_t *d, IR2_OPND *gpa,
+                              IR2_OPND *valid, IR2_OPND *writable,
+                              IR2_OPND *index, IR2_OPND *base,
+                              IR2_OPND *bit, IR2_OPND *tmp,
+                              IR2_OPND *slow, bool large)
+{
+    IR2_OPND done = la_new_label();
+
+    if (!d->smc_bitmap_base || !d->smc_bitmap_high_water || !d->smc_bitmap_words) {
+        la_out1(LISA_B, slow);
+        return;
+    }
+    if (valid) {
+        la_out2(LISA_BEQZ, valid, &done);
+    }
+    if (option_smc_bitmap_rw) {
+        la_out2(LISA_BEQZ, writable, &done);
+    }
+    /* A 1M half covers four aligned bitmap words. */
+    g_assert(!large || !(d->smc_bitmap_words & 3));
+    la_out2i(LISA_SRLI_D, index, gpa, 18);
+    la_imm(tmp, d->smc_bitmap_words);
+    la_out3(LISA_BGEU, index, tmp, slow);
+    la_out2i(LISA_ADDI_D, tmp, index, large ? 4 : 1);
+    la_imm(base, DMW_IN((uintptr_t)d->smc_bitmap_high_water));
+    la_out3(LISA_AMMAX_DU, &la_zero, base, tmp);
+    la_out2i(LISA_SLLI_D, index, index, 3);
+    la_imm(base, DMW_IN((uintptr_t)d->smc_bitmap_base));
+    la_out3(LISA_ADD_D, base, base, index);
+    if (large) {
+        la_out2i(LISA_ADDI_D, bit, &la_zero, -1);
+        for (int i = 0; i < 4; i++) {
+            la_out3(LISA_AMOR_D, &la_zero, base, bit);
+            if (i != 3) {
+                la_out2i(LISA_ADDI_D, base, base, 8);
+            }
+        }
+    } else {
+        la_out2i(LISA_SRLI_D, index, gpa, 12);
+        la_out2i(LISA_ANDI, index, index, 63);
+        la_out2i(LISA_ORI, bit, &la_zero, 1);
+        la_out3(LISA_SLL_D, bit, bit, index);
+        la_out3(LISA_AMOR_D, &la_zero, base, bit);
+    }
+    la_label(done);
 }
 
 static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
@@ -661,6 +758,27 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
     la_out2i(LISA_ANDI,   &la_t6, &la_t6, HAMT_PTWFLAGS_NO2M);
     la_out3 (LISA_OR,     &la_a3, &la_t4, &la_t6);
     la_out2 (LISA_BNEZ,   &la_a3, &big_page_do_4k);
+    if (hamt_smc_bitmap_enabled()) {
+        /* Recheck NO2M after publishing all 4K pages in both halves. */
+        la_out3(LISA_SUB_D, &la_t4, &la_t1, &la_t7);
+        gen_hamt_smc_mark(d, &la_t4, NULL, &la_a0, &la_t6, &la_a2,
+                          &la_a3, &la_t4, &ptw_no, true);
+        la_out3(LISA_SUB_D, &la_t4, &la_t2, &la_t7);
+        gen_hamt_smc_mark(d, &la_t4, NULL, &la_a1, &la_t6, &la_a2,
+                          &la_a3, &la_t4, &ptw_no, true);
+        la_outi(LISA_DBAR, 0);
+        la_out3(LISA_SUB_D, &la_t4, &la_t1, &la_t7);
+        la_out3(LISA_SUB_D, &la_t6, &la_t2, &la_t7);
+        la_out2i(LISA_SRLI_D, &la_t4, &la_t4, 12);
+        la_out2i(LISA_SRLI_D, &la_t6, &la_t6, 12);
+        la_out2i(LISA_LD_D, &la_a3, &la_env, offsetof(CPUX86State, ptwflags));
+        la_out3(LISA_LDX_B, &la_t4, &la_a3, &la_t4);
+        la_out3(LISA_LDX_B, &la_t6, &la_a3, &la_t6);
+        la_out2i(LISA_ANDI, &la_t4, &la_t4, HAMT_PTWFLAGS_NO2M);
+        la_out2i(LISA_ANDI, &la_t6, &la_t6, HAMT_PTWFLAGS_NO2M);
+        la_out3(LISA_OR, &la_a3, &la_t4, &la_t6);
+        la_out2(LISA_BNEZ, &la_a3, &big_page_do_4k);
+    }
     la_out3(LISA_MASKNEZ, &la_a0, &la_a0, &la_t4);
     la_out3(LISA_MASKNEZ, &la_a1, &la_a1, &la_t6);
 
@@ -734,6 +852,13 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
      * la_a0 : D(1) for elo0 after RW
      * la_a1 : D(1) for elo1 after RW
      */
+    if (hamt_smc_bitmap_enabled()) {
+        gen_hamt_smc_mark(d, &la_t1, NULL, &la_a0, &la_t3, &la_t4,
+                          &la_t5, &la_t6, &ptw_no, false);
+        gen_hamt_smc_mark(d, &la_t2, NULL, &la_a1, &la_t3, &la_t4,
+                          &la_t5, &la_t6, &ptw_no, false);
+        la_outi(LISA_DBAR, 0);
+    }
     /* check ptwflags[paddr>>12] */
     la_out2i(LISA_SRLI_D, &la_t4, &la_t1, 12); // paddr0 >> 12
     la_out2i(LISA_SRLI_D, &la_t6, &la_t2, 12); // paddr1 >> 12
@@ -995,6 +1120,13 @@ static void __latxs_gen_hamt_excp_tlbrefill_hamt_ptw2m(hamt_excp_t *d)
     la_out3(LISA_OR,   &la_t4, &la_a2, &la_a3);
     la_out2(LISA_BEQZ, &la_t4, &ptw_no);
 
+    if (hamt_smc_bitmap_enabled()) {
+        gen_hamt_smc_mark(d, &la_t1, &la_a2, &la_a0, &la_t3, &la_t4,
+                          &la_t5, &la_t6, &ptw_no, false);
+        gen_hamt_smc_mark(d, &la_t2, &la_a3, &la_a1, &la_t3, &la_t4,
+                          &la_t5, &la_t6, &ptw_no, false);
+        la_outi(LISA_DBAR, 0);
+    }
     la_out2i(LISA_SRLI_D, &la_t4, &la_t1, 12);     // paddr0 >> 12
     la_out2i(LISA_SRLI_D, &la_t5, &la_t2, 12);     // paddr1 >> 12
     la_out3 (LISA_ADD_D,  &la_t1, &la_t1, &la_t7);

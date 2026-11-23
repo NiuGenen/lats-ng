@@ -34,9 +34,11 @@
 
 #include "hamt.h"
 #include "hamt-internal.h"
+#include "hamt-data.h"
 #include "hamt-tlb.h"
 #include "hamt-ptw.h"
 #include "hamt-interrupt.h"
+#include "hamt-smc-bitmap.h"
 
 #include "loongarch-csr.h"
 
@@ -89,6 +91,50 @@ static inline void set_attr(int r, int w, int x, uint64_t *addr)
     else clear_bit(1, addr);
 }
 
+/* A TLB entry contains two 4K pages. An IPI between tlbrd and tlbwr
+ * could otherwise resurrect the old sibling after acknowledging a flush. */
+static inline uint32_t hamt_tlb_pair_irq_save(void)
+{
+    uint32_t old = 0;
+
+    if (hamt_enable_ipi()) {
+        __asm__ __volatile__("csrxchg %0, %1, %2"
+                             : "+r"(old)
+                             : "r"(CSR_CRMD_IE), "i"(LOONGARCH_CSR_CRMD)
+                             : "memory");
+    }
+    return old;
+}
+
+static inline void hamt_tlb_pair_irq_restore(uint32_t old)
+{
+    if (hamt_enable_ipi()) {
+        __asm__ __volatile__("csrxchg %0, %1, %2"
+                             : "+r"(old)
+                             : "r"(CSR_CRMD_IE), "i"(LOONGARCH_CSR_CRMD)
+                             : "memory");
+    }
+}
+
+
+static uint64_t hamt_local_full_invalidations;
+
+static inline void hamt_smc_clear_local_bitmap(void)
+{
+    CPUState *cpu = current_cpu;
+
+    if (option_smc_bitmap_flush && hamt_smc_bitmap_enabled() &&
+        cpu && cpu->cpu_index >= 0 && cpu->cpu_index < HAMT_CPU_MAX) {
+        HamtSmcBitmap *bitmap = hamt_smc_bitmap_get();
+
+        if (bitmap->vcpu) {
+            /* In-flight C fills republish and recheck after their TLB write. */
+            smp_mb();
+            hamt_smc_vcpu_bitmap_clear(&bitmap->vcpu[cpu->cpu_index]);
+            smp_mb();
+        }
+    }
+}
 
 /*
  * invtlb op info addr
@@ -102,6 +148,8 @@ static inline void __local_flush_tlb_all(void)
     __asm__ __volatile__(
         ".word ((0x6498000) | (0 << 10) | (0 << 5) | 0x3)\n\t"
         );
+    qatomic_inc(&hamt_local_full_invalidations);
+    hamt_smc_clear_local_bitmap();
 }
 static inline void local_flush_tlb_all(void)
 {
@@ -112,6 +160,8 @@ static inline void local_flush_tlb_all(void)
     __asm__ __volatile__(
         ".word ((0x6498000) | (0 << 10) | (0 << 5) | 0x3)\n\t"
         );
+    qatomic_inc(&hamt_local_full_invalidations);
+    hamt_smc_clear_local_bitmap();
     if (!hamt_dmw_mode_da()) {
         enable_pg();
     }
@@ -270,6 +320,7 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
     int w = prot & PAGE_WRITE ? 1 : 0;
     int r = prot & PAGE_READ  ? 1 : 0;
     int x = prot & PAGE_EXEC  ? 1 : 0;
+    uint32_t irq_state = hamt_tlb_pair_irq_save();
     int plv = 0;
     HAMT_PROT_GET_PLV(prot, plv);
 
@@ -328,6 +379,7 @@ static void hamt_set_tlbr(uint64_t vaddr, uint64_t paddr,
     if (hamt_mode_dmw() && !hamt_dmw_mode_da()) {
         write_csr_asid(0);
     }
+    hamt_tlb_pair_irq_restore(irq_state);
 }
 
 /*
@@ -349,6 +401,7 @@ void hamt_set_tlb(void *env,
     uint64_t csr_tlbelo1 = 0;
     uint32_t csr_asid = guest_asid();
     int32_t csr_tlbidx;
+    uint32_t irq_state = hamt_tlb_pair_irq_save();
 
     int w = prot & PAGE_WRITE ? 1 : 0;
     int plv = 0;
@@ -403,6 +456,7 @@ void hamt_set_tlb(void *env,
     if (!hamt_dmw_mode_da()) {
         enable_pg();
     }
+    hamt_tlb_pair_irq_restore(irq_state);
 }
 
 void hamt_set_hardware_tlb_nocheck(void *env,
@@ -426,6 +480,68 @@ void hamt_set_hardware_tlb(void *env,
     }
 }
 
+static uint64_t smc_protect_calls, smc_flush_candidates, smc_flush_selected;
+static uint64_t smc_full_fallbacks;
+static uint64_t smc_deferred_published, smc_deferred_skipped;
+static uint64_t smc_resume_invalidations;
+static pthread_once_t smc_stats_once = PTHREAD_ONCE_INIT;
+extern uint64_t hamt_data_area[];
+static unsigned smc_deferred_flush[HAMT_CPU_MAX];
+
+void hamt_smc_resume_flush(CPUState *cpu)
+{
+    int cpuid = cpu->cpu_index;
+
+    if (!hamt_enabled() || !hamt_is_running() ||
+        cpuid < 0 || cpuid >= HAMT_CPU_MAX) {
+        return;
+    }
+    if (qatomic_xchg(&smc_deferred_flush[cpuid], 0)) {
+        hamt_flush_tlb_all();
+        qatomic_inc(&smc_resume_invalidations);
+    }
+}
+
+static void hamt_smc_defer_flush(CPUState *cpu)
+{
+    g_assert(cpu->cpu_index >= 0 && cpu->cpu_index < HAMT_CPU_MAX);
+    qatomic_inc(&smc_deferred_published);
+    qatomic_set(&smc_deferred_flush[cpu->cpu_index], 1);
+    smp_mb();
+}
+
+static void hamt_smc_stats_print(void)
+{
+    uint64_t candidates = qatomic_read(&smc_flush_candidates);
+    uint64_t selected = qatomic_read(&smc_flush_selected);
+    uint64_t ipi_full = 0;
+
+    for (int i = 0; i < hamt_cpus_num && i < HAMT_CPU_MAX; i++) {
+        if (hamt_data_area[i]) {
+            uint64_t *area = (uint64_t *)hamt_data_area[i];
+            ipi_full += qatomic_read(&area[HD_CNT_IPI_INDEX]);
+        }
+    }
+
+    fprintf(stderr, "HAMT SMC bitmap: protect=%" PRIu64
+            " candidates=%" PRIu64 " selected=%" PRIu64
+            " skipped=%" PRIu64 " full=%" PRIu64 "\n",
+            qatomic_read(&smc_protect_calls), candidates, selected,
+            candidates - selected, qatomic_read(&smc_full_fallbacks));
+    fprintf(stderr, "HAMT TLB full invalidations: local=%" PRIu64
+            " ipi=%" PRIu64 "\n",
+            qatomic_read(&hamt_local_full_invalidations), ipi_full);
+    fprintf(stderr, "HAMT SMC deferred: published=%" PRIu64
+            " skipped=%" PRIu64 " resume=%" PRIu64 "\n",
+            qatomic_read(&smc_deferred_published),
+            qatomic_read(&smc_deferred_skipped), qatomic_read(&smc_resume_invalidations));
+}
+
+static void hamt_smc_stats_init(void)
+{
+    atexit(hamt_smc_stats_print);
+}
+
 void hamt_protect_code(uint64_t guest_phys_page, int full)
 {
     if (!(hamt_enabled() && hamt_is_running())) {
@@ -433,11 +549,41 @@ void hamt_protect_code(uint64_t guest_phys_page, int full)
     }
 
     CPUState *cpu;
-
-    hamt_flush_tlb_all();
-
     int ncpus = hamt_cpus_num;
     int cpuid = current_cpu->cpu_index;
+    uint64_t sequence = 0;
+    uint32_t targets = ncpus >= 32 ? UINT32_MAX : (1U << ncpus) - 1;
+    bool selective = hamt_smc_bitmap_enabled() && ncpus > 0 &&
+                     ncpus <= 32 && cpuid >= 0 && cpuid < ncpus;
+
+    if (selective) {
+        CPU_FOREACH(cpu) {
+            if (cpu->cpu_index < 0 || cpu->cpu_index >= ncpus) {
+                selective = false;
+            }
+        }
+    }
+
+    pthread_once(&smc_stats_once, hamt_smc_stats_init);
+    qatomic_inc(&smc_protect_calls);
+    qatomic_add(&smc_flush_candidates, ncpus);
+    if (selective) {
+        if (!full) {
+            hamt_smc_bitmap_publish();
+            targets &= hamt_smc_bitmap_mask(hamt_smc_bitmap_get(),
+                                            guest_phys_page);
+        } else {
+            qatomic_inc(&smc_full_fallbacks);
+        }
+        qatomic_add(&smc_flush_selected, __builtin_popcount(targets));
+    } else {
+        qatomic_inc(&smc_full_fallbacks);
+        qatomic_add(&smc_flush_selected, ncpus);
+    }
+
+    if (!selective || (targets & (1U << cpuid))) {
+        hamt_flush_tlb_all();
+    }
 
     // uint64_t *b0,b1,b2,b3
     // CPU0: wait for ------- b0[1*8] b0[2*8] b0[3*8]
@@ -446,13 +592,12 @@ void hamt_protect_code(uint64_t guest_phys_page, int full)
     // CPU3: wait for b3[0*8] b3[1*8] b3[2*8] -------
 
     if (hamt_enable_ipi_sync()) {
-        // CPU0 prepare to wait for CPU1,CPU2,CPU3 to reponse IPI
-        // set b0[1*8] b0[2*8] b0[3*8] to 0
-        hamt_prepare_ipi(cpuid, ncpus);
+        sequence = hamt_prepare_ipi(cpuid, ncpus);
     }
 
     CPU_FOREACH(cpu) {
-        if (!qemu_cpu_is_self(cpu)) {
+        if (!qemu_cpu_is_self(cpu) &&
+            (!selective || (targets & (1U << cpu->cpu_index)))) {
             hamt_send_ipi(cpuid, cpu);
         }
     }
@@ -464,24 +609,35 @@ void hamt_protect_code(uint64_t guest_phys_page, int full)
             crmd, ecfg);
 
     if (hamt_enable_ipi_sync()) {
-        // CPU1 do IPI from CPU0 : set b0[1*8] to -1
-        // CPU2 do IPI from CPU0 : set b0[2*8] to -1
-        // CPU3 do IPI from CPU0 : set b0[3*8] to -1
         uint64_t r = 0;
-        int mask = (-1) & ~(1<<cpuid);
-        int waitcpus = ncpus - 1;
-        while (!hamt_finish_ipi(cpuid, &r, ncpus, mask, waitcpus)) {
+        unsigned retries = 0;
+        int mask = selective ? targets & ~(1U << cpuid) : (-1) & ~(1 << cpuid);
+        int waitcpus = selective ? __builtin_popcount((unsigned)mask) : ncpus - 1;
+        while (!hamt_finish_ipi(cpuid, &r, ncpus, mask, waitcpus, sequence)) {
             smp_mb();
             CPU_FOREACH(cpu) {
                 if (qemu_cpu_is_self(cpu)) continue;
                 int c = cpu->cpu_index;
                 if (!(mask & (1<<c))) continue;
-                if (!cpu->running) {
-                    waitcpus -= 1;
-                    mask = mask & ~(1<<c);
+                if (!qatomic_read(&cpu->running)) {
+                    hamt_smc_defer_flush(cpu);
+                    if (!qatomic_read(&cpu->running)) {
+                        qatomic_inc(&smc_deferred_skipped);
+                        waitcpus -= 1;
+                        mask = mask & ~(1<<c);
+                        continue;
+                    }
+                }
+                /* A same-source request can merge with an older pending IPI.
+                 * Retry until the matching sequence has been acknowledged. */
+                if (!(retries & 0xffff)) {
+                    hamt_send_ipi(cpuid, cpu);
                 }
             }
+            retries++;
         }
+        /* Do not publish completed protection before observing all acks. */
+        smp_mb();
     }
 }
 
